@@ -1,0 +1,209 @@
+<?php
+/**
+ * Copyright © StackNuts. All rights reserved.
+ * See LICENSE for license details.
+ */
+
+declare(strict_types=1);
+
+namespace StackNuts\StackGaugePerformance\Model\Reporter;
+
+use Magento\Framework\App\ResourceConnection;
+use StackNuts\StackGauge\Api\DeclaresSectionInterface;
+use StackNuts\StackGauge\Api\Field\Field;
+use StackNuts\StackGauge\Api\MetricCatalogInterface;
+use StackNuts\StackGauge\Api\MetricDefinition;
+use StackNuts\StackGauge\Api\ReporterInterface;
+use StackNuts\StackGauge\Api\Section\Section;
+use StackNuts\StackGauge\Model\Reporter\Concern\PerformanceSectionTrait;
+use Throwable;
+
+/**
+ * MySQL/MariaDB runtime pressure from SHOW GLOBAL STATUS/VARIABLES: connection headroom, slow
+ * queries, on-disk temp tables and InnoDB buffer pool hit rate. Counters are cumulative since
+ * server start, so rates here are lifetime ratios and slow queries use a delta metric.
+ */
+class MysqlRuntimeReporter implements ReporterInterface, DeclaresSectionInterface, MetricCatalogInterface
+{
+    use PerformanceSectionTrait;
+
+    private const SCHEMA_VERSION = '1.0';
+    private const METRIC_CONNECTION_USAGE = 'mysql_runtime.connection_usage_pct';
+    private const METRIC_SLOW_QUERIES = 'mysql_runtime.slow_queries';
+    private const METRIC_BUFFER_POOL_HIT = 'mysql_runtime.buffer_pool_hit_pct';
+
+    private const STATUS_KEYS = [
+        'Threads_connected', 'Threads_running', 'Max_used_connections', 'Slow_queries', 'Aborted_connects',
+        'Created_tmp_tables', 'Created_tmp_disk_tables', 'Innodb_buffer_pool_reads',
+        'Innodb_buffer_pool_read_requests', 'Uptime',
+    ];
+
+    private const VARIABLE_KEYS = ['max_connections', 'innodb_buffer_pool_size', 'slow_query_log'];
+
+    /**
+     * @param ResourceConnection $resource
+     * @param Field $field
+     * @param Section $section
+     */
+    public function __construct(
+        private readonly ResourceConnection $resource,
+        private readonly Field $field,
+        private readonly Section $section
+    ) {
+    }
+
+    /**
+     * Payload key for the MySQL runtime reporter.
+     */
+    public function getName(): string
+    {
+        return 'mysql_runtime';
+    }
+
+    /**
+     * Human-readable label for the MySQL runtime reporter block.
+     */
+    public function getLabel(): string
+    {
+        return 'MySQL Runtime';
+    }
+
+    /**
+     * One-line summary of what the MySQL runtime reporter covers.
+     */
+    public function getDescription(): string
+    {
+        return 'Connection headroom, slow queries, temp tables spilling to disk and InnoDB buffer pool hit rate.';
+    }
+
+    /**
+     * Schema version for this reporter's payload shape.
+     */
+    public function getSchemaVersion(): string
+    {
+        return self::SCHEMA_VERSION;
+    }
+
+    /**
+     * Reports database runtime pressure, or just that status was unreadable.
+     */
+    public function getStatus(): array
+    {
+        try {
+            $connection = $this->resource->getConnection();
+            $status = $connection->fetchPairs($this->showQuery('STATUS', self::STATUS_KEYS));
+            $variables = $connection->fetchPairs($this->showQuery('VARIABLES', self::VARIABLE_KEYS));
+        } catch (Throwable) {
+            return ['general' => $this->section->facts('general', 'General', $this->getDescription(), [
+                'status_available' => $this->field->bool('Status Available', false, criticalWhen: false),
+            ])];
+        }
+
+        $maxConnections = (int)($variables['max_connections'] ?? 0);
+        $maxUsed = (int)($status['Max_used_connections'] ?? 0);
+        $tmpTables = (int)($status['Created_tmp_tables'] ?? 0);
+        $tmpDisk = (int)($status['Created_tmp_disk_tables'] ?? 0);
+        $poolReads = (int)($status['Innodb_buffer_pool_reads'] ?? 0);
+        $poolRequests = (int)($status['Innodb_buffer_pool_read_requests'] ?? 0);
+
+        $fields = [
+            'status_available' => $this->field->bool('Status Available', true, criticalWhen: false),
+            'uptime_hours' => $this->field->number('Uptime (hours)', (int)floor((int)($status['Uptime'] ?? 0) / 3600)),
+            'max_connections' => $this->field->number('Max Connections', $maxConnections),
+            'threads_connected' => $this->field->number('Threads Connected', (int)($status['Threads_connected'] ?? 0)),
+            'threads_running' => $this->field->number('Threads Running', (int)($status['Threads_running'] ?? 0)),
+            'aborted_connects' => $this->field->number('Aborted Connects', (int)($status['Aborted_connects'] ?? 0)),
+            'slow_query_log_enabled' => $this->field->bool(
+                'Slow Query Log Enabled',
+                in_array(strtoupper((string)($variables['slow_query_log'] ?? '')), ['ON', '1'], true)
+            ),
+            'innodb_buffer_pool_size_mb' => $this->field->number(
+                'InnoDB Buffer Pool (MB)',
+                (int)round((int)($variables['innodb_buffer_pool_size'] ?? 0) / 1048576)
+            ),
+            'slow_queries' => $this->field->trackableNumber(
+                'Slow Queries (since start)',
+                (int)($status['Slow_queries'] ?? 0),
+                self::METRIC_SLOW_QUERIES,
+                MetricDefinition::AGGREGATION_DELTA
+            ),
+            'tmp_tables_on_disk_pct' => $this->field->number(
+                'Temp Tables On Disk (%)',
+                $tmpTables > 0 ? round(($tmpDisk / $tmpTables) * 100, 2) : 0.0
+            ),
+        ];
+
+        if ($maxConnections > 0) {
+            $fields['connection_usage_pct'] = $this->field->trackableNumber(
+                'Peak Connection Usage (%)',
+                round(($maxUsed / $maxConnections) * 100, 2),
+                self::METRIC_CONNECTION_USAGE,
+                MetricDefinition::AGGREGATION_MAX
+            );
+        }
+
+        if ($poolRequests > 0) {
+            $fields['buffer_pool_hit_pct'] = $this->field->trackableNumber(
+                'InnoDB Buffer Pool Hit Rate (%)',
+                round((1 - $poolReads / $poolRequests) * 100, 3),
+                self::METRIC_BUFFER_POOL_HIT,
+                MetricDefinition::AGGREGATION_MIN
+            );
+        }
+
+        return ['general' => $this->section->facts('general', 'General', $this->getDescription(), $fields)];
+    }
+
+    /**
+     * Alertable metrics: connection headroom, slow query growth and buffer pool misses.
+     */
+    public function getTrackableMetrics(): array
+    {
+        return [
+            new MetricDefinition(
+                self::METRIC_CONNECTION_USAGE,
+                'MySQL: Peak Connection Usage (%)',
+                MetricDefinition::AGGREGATION_MAX,
+                MetricDefinition::OPERATOR_GT,
+                80,
+                360,
+                null,
+                description: 'MySQL connections peaked at {value}% of max_connections.',
+                impact: 'At 100% new requests fail with "too many connections" errors.'
+            ),
+            new MetricDefinition(
+                self::METRIC_SLOW_QUERIES,
+                'MySQL: New Slow Queries',
+                MetricDefinition::AGGREGATION_DELTA,
+                MetricDefinition::OPERATOR_GT,
+                100,
+                360,
+                null,
+                description: '{value} new slow queries were logged in the window.',
+                impact: 'Slow queries hold connections open and are the usual cause of storefront and admin slowness.'
+            ),
+            new MetricDefinition(
+                self::METRIC_BUFFER_POOL_HIT,
+                'MySQL: InnoDB Buffer Pool Hit Rate (%)',
+                MetricDefinition::AGGREGATION_MIN,
+                MetricDefinition::OPERATOR_LT,
+                95,
+                360,
+                null,
+                description: 'The InnoDB buffer pool hit rate is {value}%.',
+                impact: 'Reads are going to disk instead of memory; the buffer pool is likely undersized.'
+            ),
+        ];
+    }
+
+    /**
+     * Builds a SHOW GLOBAL ... query restricted to a fixed, trusted list of variable names.
+     *
+     * @param string $kind
+     * @param list<string> $keys
+     */
+    private function showQuery(string $kind, array $keys): string
+    {
+        return sprintf("SHOW GLOBAL %s WHERE Variable_name IN ('%s')", $kind, implode("','", $keys));
+    }
+}

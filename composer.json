@@ -1,0 +1,39 @@
+{
+  "name": "stacknuts/magento-stackgauge-performance",
+  "description": "Runtime performance signals (PHP OPcache, MySQL, Redis, cron duration) for StackNuts StackGauge, split out so sites that already have dedicated APM tooling aren't paying its cost for nothing.",
+  "type": "magento2-module",
+  "keywords": ["magento2", "performance", "stackgauge", "opcache", "monitoring"],
+  "homepage": "https://github.com/StackNuts/magento-stackgauge-performance",
+  "authors": [
+    {
+      "name": "Phil Rowe",
+      "email": "stack.nuts@outlook.com"
+    }
+  ],
+  "support": {
+    "issues": "https://github.com/StackNuts/magento-stackgauge-performance/issues",
+    "source": "https://github.com/StackNuts/magento-stackgauge-performance"
+  },
+  "license": "proprietary",
+  "require": {
+    "php": "~8.1.0||~8.2.0||~8.3.0||~8.4.0",
+    "stacknuts/magento-stackgauge": ">=0.3.4 <1.0",
+    "magento/framework": ">=103.0 <104"
+  },
+  "require-dev": {
+    "phpunit/phpunit": "^10.5 || ^11.5 || ^12.0"
+  },
+  "autoload": {
+    "files": [
+      "registration.php"
+    ],
+    "psr-4": {
+      "StackNuts\\StackGaugePerformance\\": ""
+    }
+  },
+  "autoload-dev": {
+    "psr-4": {
+      "StackNuts\\StackGaugePerformance\\Test\\": "Test/"
+    }
+  }
+}
