@@ -44,6 +44,7 @@ class WebRuntimeCollector
             return null;
         }
 
+        // phpcs:ignore Generic.PHP.NoSilencedErrors.Discouraged
         $status = @opcache_get_status(false);
         if (!is_array($status) || empty($status['opcache_enabled'])) {
             return null;

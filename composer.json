@@ -2,7 +2,13 @@
   "name": "stacknuts/magento-stackgauge-performance",
   "description": "Runtime performance signals (PHP OPcache, MySQL, Redis, cron duration) for StackNuts StackGauge, split out so sites that already have dedicated APM tooling aren't paying its cost for nothing.",
   "type": "magento2-module",
-  "keywords": ["magento2", "performance", "stackgauge", "opcache", "monitoring"],
+  "keywords": [
+    "magento2",
+    "performance",
+    "stackgauge",
+    "opcache",
+    "monitoring"
+  ],
   "homepage": "https://github.com/StackNuts/magento-stackgauge-performance",
   "authors": [
     {
@@ -35,5 +41,13 @@
     "psr-4": {
       "StackNuts\\StackGaugePerformance\\Test\\": "Test/"
     }
+  },
+  "scripts": {
+    "phpstan": "phpstan analyse -c phpstan.neon.dist --no-progress --memory-limit=2G",
+    "phpcs": "phpcs --standard=phpcs.xml.dist",
+    "check": [
+      "@phpstan",
+      "@phpcs"
+    ]
   }
 }

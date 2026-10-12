@@ -49,6 +49,7 @@ class KeyPageDiscovery
     {
         try {
             $store = $this->storeManager->getDefaultStoreView();
+            /** @var \Magento\Store\Model\Store $store */
             $base = rtrim((string)$store->getBaseUrl(), '/') . '/';
             $storeId = (int)$store->getId();
         } catch (Throwable) {
