@@ -10,6 +10,7 @@ namespace StackNuts\StackGaugePerformance\Model\Reporter;
 
 use Magento\Framework\App\ResourceConnection;
 use StackNuts\StackGauge\Api\DeclaresSectionInterface;
+use StackNuts\StackGauge\Api\DeclaresSlotInterface;
 use StackNuts\StackGauge\Api\Field\Field;
 use StackNuts\StackGauge\Api\MetricCatalogInterface;
 use StackNuts\StackGauge\Api\MetricDefinition;
@@ -23,7 +24,7 @@ use Throwable;
  * queries, on-disk temp tables and InnoDB buffer pool hit rate. Counters are cumulative since
  * server start, so rates here are lifetime ratios and slow queries use a delta metric.
  */
-class MysqlRuntimeReporter implements ReporterInterface, DeclaresSectionInterface, MetricCatalogInterface
+class MysqlRuntimeReporter implements ReporterInterface, DeclaresSectionInterface, MetricCatalogInterface, DeclaresSlotInterface
 {
     use PerformanceSectionTrait;
 
@@ -205,5 +206,13 @@ class MysqlRuntimeReporter implements ReporterInterface, DeclaresSectionInterfac
     private function showQuery(string $kind, array $keys): string
     {
         return sprintf("SHOW GLOBAL %s WHERE Variable_name IN ('%s')", $kind, implode("','", $keys));
+    }
+
+    /**
+     * Run 1 within this reporter's cadence tier.
+     */
+    public function getSlot(): int
+    {
+        return 1;
     }
 }

@@ -11,6 +11,7 @@ namespace StackNuts\StackGaugePerformance\Model\Reporter;
 use Magento\Framework\Module\ModuleListInterface;
 use StackNuts\StackGauge\Api\DeclaresCadenceInterface;
 use StackNuts\StackGauge\Api\DeclaresSectionInterface;
+use StackNuts\StackGauge\Api\DeclaresSlotInterface;
 use StackNuts\StackGauge\Api\Field\Field;
 use StackNuts\StackGauge\Api\ReporterInterface;
 use StackNuts\StackGauge\Api\Section\Section;
@@ -22,7 +23,7 @@ use StackNuts\StackGauge\Model\Reporter\Concern\PerformanceSectionTrait;
  * limited to modules with a documented tendency to add per-request or per-product cost; a hit
  * is a prompt to profile that module, not a verdict that it is slow on this store.
  */
-class ModuleHygieneReporter implements ReporterInterface, DeclaresCadenceInterface, DeclaresSectionInterface
+class ModuleHygieneReporter implements ReporterInterface, DeclaresCadenceInterface, DeclaresSectionInterface, DeclaresSlotInterface
 {
     use DailyCadenceTrait;
     use PerformanceSectionTrait;
@@ -120,5 +121,13 @@ class ModuleHygieneReporter implements ReporterInterface, DeclaresCadenceInterfa
             ]),
             'flagged' => $this->section->table('flagged', 'Flagged Modules', $this->getDescription(), $rows),
         ];
+    }
+
+    /**
+     * Run 1 within this reporter's cadence tier.
+     */
+    public function getSlot(): int
+    {
+        return 1;
     }
 }

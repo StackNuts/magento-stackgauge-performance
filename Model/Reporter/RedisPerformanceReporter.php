@@ -11,6 +11,7 @@ namespace StackNuts\StackGaugePerformance\Model\Reporter;
 use Credis_Client;
 use Magento\Framework\App\DeploymentConfig;
 use StackNuts\StackGauge\Api\DeclaresSectionInterface;
+use StackNuts\StackGauge\Api\DeclaresSlotInterface;
 use StackNuts\StackGauge\Api\Field\Field;
 use StackNuts\StackGauge\Api\MetricCatalogInterface;
 use StackNuts\StackGauge\Api\MetricDefinition;
@@ -25,7 +26,7 @@ use Throwable;
  * Backends are de-duplicated by host:port since INFO is instance-wide, so two cache databases
  * on one instance aren't double counted.
  */
-class RedisPerformanceReporter implements ReporterInterface, DeclaresSectionInterface, MetricCatalogInterface
+class RedisPerformanceReporter implements ReporterInterface, DeclaresSectionInterface, MetricCatalogInterface, DeclaresSlotInterface
 {
     use PerformanceSectionTrait;
 
@@ -254,5 +255,13 @@ class RedisPerformanceReporter implements ReporterInterface, DeclaresSectionInte
         } catch (Throwable) {
             return null;
         }
+    }
+
+    /**
+     * Run 1 within this reporter's cadence tier.
+     */
+    public function getSlot(): int
+    {
+        return 1;
     }
 }

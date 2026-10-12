@@ -1,0 +1,13 @@
+<?xml version="1.0"?>
+<config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="urn:magento:module:Magento_Store:etc/config.xsd">
+    <default>
+        <stacknuts_stackgauge>
+            <page_speed>
+                <category_path/>
+                <product_path/>
+                <search_path/>
+                <cart_path/>
+            </page_speed>
+        </stacknuts_stackgauge>
+    </default>
+</config>

@@ -10,6 +10,7 @@ namespace StackNuts\StackGaugePerformance\Model\Reporter;
 
 use Magento\Framework\App\ResourceConnection;
 use StackNuts\StackGauge\Api\DeclaresSectionInterface;
+use StackNuts\StackGauge\Api\DeclaresSlotInterface;
 use StackNuts\StackGauge\Api\Field\Field;
 use StackNuts\StackGauge\Api\MetricCatalogInterface;
 use StackNuts\StackGauge\Api\MetricDefinition;
@@ -24,7 +25,7 @@ use Throwable;
  * retention (about an hour for successes by default), so these are recent-window figures.
  * Times are compared in SQL against UTC_TIMESTAMP() to sidestep PHP's mutable default timezone.
  */
-class CronPerformanceReporter implements ReporterInterface, DeclaresSectionInterface, MetricCatalogInterface
+class CronPerformanceReporter implements ReporterInterface, DeclaresSectionInterface, MetricCatalogInterface, DeclaresSlotInterface
 {
     use PerformanceSectionTrait;
 
@@ -201,5 +202,13 @@ class CronPerformanceReporter implements ReporterInterface, DeclaresSectionInter
                 impact: 'Failing jobs mean scheduled work (indexing, imports, emails) is not completing.'
             ),
         ];
+    }
+
+    /**
+     * Run 2 within this reporter's cadence tier.
+     */
+    public function getSlot(): int
+    {
+        return 2;
     }
 }

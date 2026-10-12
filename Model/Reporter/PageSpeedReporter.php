@@ -9,6 +9,7 @@ declare(strict_types=1);
 namespace StackNuts\StackGaugePerformance\Model\Reporter;
 
 use StackNuts\StackGauge\Api\DeclaresSectionInterface;
+use StackNuts\StackGauge\Api\DeclaresSlotInterface;
 use StackNuts\StackGauge\Api\Field\Field;
 use StackNuts\StackGauge\Api\MetricCatalogInterface;
 use StackNuts\StackGauge\Api\MetricDefinition;
@@ -24,7 +25,7 @@ use StackNuts\StackGaugePerformance\Model\Probe\PageTimer;
  * noise. The homepage is already timed by the uptime reporter. Each page is requested once, so a
  * cold full-page-cache entry shows up as a slow "miss" rather than being hidden by a warm-up hit.
  */
-class PageSpeedReporter implements ReporterInterface, DeclaresSectionInterface, MetricCatalogInterface
+class PageSpeedReporter implements ReporterInterface, DeclaresSectionInterface, MetricCatalogInterface, DeclaresSlotInterface
 {
     use PerformanceSectionTrait;
 
@@ -91,7 +92,8 @@ class PageSpeedReporter implements ReporterInterface, DeclaresSectionInterface, 
         $summary = [];
         $rows = [];
 
-        foreach ($this->discovery->discover() as $type => $url) {
+        foreach ($this->discovery->discover() as $type => $page) {
+            $url = $page['url'];
             $result = $this->timer->time($url);
             $responded = $result['status'] > 0;
 
@@ -107,6 +109,7 @@ class PageSpeedReporter implements ReporterInterface, DeclaresSectionInterface, 
             $rows[] = $this->field->array($type, [
                 'page' => $this->field->varchar('Page', $type),
                 'url' => $this->field->varchar('URL', $url),
+                'source' => $this->field->varchar('Source', $page['source']),
                 'http_status' => $this->field->number('HTTP Status', $result['status']),
                 'ttfb_ms' => $this->field->number('TTFB (ms)', $result['ttfb_ms']),
                 'total_ms' => $this->field->number('Total (ms)', $result['total_ms']),
@@ -143,5 +146,13 @@ class PageSpeedReporter implements ReporterInterface, DeclaresSectionInterface, 
         }
 
         return $metrics;
+    }
+
+    /**
+     * Run 2 within this reporter's cadence tier.
+     */
+    public function getSlot(): int
+    {
+        return 2;
     }
 }

@@ -8,6 +8,7 @@ declare(strict_types=1);
 
 namespace StackNuts\StackGaugePerformance\Model\Probe;
 
+use Magento\Framework\App\Config\ScopeConfigInterface;
 use Magento\Framework\App\ResourceConnection;
 use Magento\Store\Model\StoreManagerInterface;
 use Throwable;
@@ -15,27 +16,34 @@ use Throwable;
 /**
  * Picks representative storefront URLs to time: the category with the most products (the heaviest
  * listing page), the lowest-id product with a canonical rewrite, plus fixed search and cart paths.
- * Uses the default store view's url_rewrite rows so no catalog collections are loaded.
+ * Uses the default store view's url_rewrite rows so no catalog collections are loaded. Each type can
+ * be pinned in admin config (a path on this store, or a full URL on the same host); a pinned type
+ * is reported with source "pinned", an auto-picked one with "auto".
  */
 class KeyPageDiscovery
 {
+    public const SOURCE_AUTO = 'auto';
+    public const SOURCE_PINNED = 'pinned';
+    public const CONFIG_PREFIX = 'stacknuts_stackgauge/page_speed/';
     private const SEARCH_TERM = 'product';
 
     /**
      * @param ResourceConnection $resource
      * @param StoreManagerInterface $storeManager
+     * @param ScopeConfigInterface $scopeConfig
      */
     public function __construct(
         private readonly ResourceConnection $resource,
-        private readonly StoreManagerInterface $storeManager
+        private readonly StoreManagerInterface $storeManager,
+        private readonly ScopeConfigInterface $scopeConfig
     ) {
     }
 
     /**
-     * Page type => absolute URL. A type is omitted when it cannot be determined; empty when
+     * Page type => url and source. A type is omitted when it cannot be determined; empty when
      * the store has no usable base URL.
      *
-     * @return array<string, string>
+     * @return array<string, array{url: string, source: string}>
      */
     public function discover(): array
     {
@@ -47,19 +55,44 @@ class KeyPageDiscovery
             return [];
         }
 
+        $defaults = [
+            'category' => fn (): ?string => $this->firstPath($this->categoryQuery(), $storeId),
+            'product' => fn (): ?string => $this->firstPath($this->productQuery(), $storeId),
+            'search' => static fn (): string => 'catalogsearch/result/?q=' . self::SEARCH_TERM,
+            'cart' => static fn (): string => 'checkout/cart/',
+        ];
+
         $pages = [];
-        $category = $this->firstPath($this->categoryQuery(), $storeId);
-        if ($category !== null) {
-            $pages['category'] = $base . $category;
+        foreach ($defaults as $type => $auto) {
+            $pinned = $this->pinnedUrl($type, $base);
+            if ($pinned !== null) {
+                $pages[$type] = ['url' => $pinned, 'source' => self::SOURCE_PINNED];
+                continue;
+            }
+            $path = $auto();
+            if ($path !== null) {
+                $pages[$type] = ['url' => $base . $path, 'source' => self::SOURCE_AUTO];
+            }
         }
-        $product = $this->firstPath($this->productQuery(), $storeId);
-        if ($product !== null) {
-            $pages['product'] = $base . $product;
-        }
-        $pages['search'] = $base . 'catalogsearch/result/?q=' . self::SEARCH_TERM;
-        $pages['cart'] = $base . 'checkout/cart/';
 
         return $pages;
+    }
+
+    /**
+     * Admin override for a page type: a relative path, or a full URL that must be on this store's
+     * host (so a typo can't turn the probe into a request to somewhere else).
+     */
+    private function pinnedUrl(string $type, string $base): ?string
+    {
+        $value = trim((string)$this->scopeConfig->getValue(self::CONFIG_PREFIX . $type . '_path'));
+        if ($value === '') {
+            return null;
+        }
+        if (preg_match('#^https?://#i', $value) === 1) {
+            return parse_url($value, PHP_URL_HOST) === parse_url($base, PHP_URL_HOST) ? $value : null;
+        }
+
+        return $base . ltrim($value, '/');
     }
 
     private function categoryQuery(): string

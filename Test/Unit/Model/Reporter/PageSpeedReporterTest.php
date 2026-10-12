@@ -16,9 +16,9 @@ class PageSpeedReporterTest extends TestCase
     {
         $discovery = $this->createMock(KeyPageDiscovery::class);
         $discovery->method('discover')->willReturn([
-            'category' => 'https://shop.test/cat.html',
-            'product' => 'https://shop.test/p.html',
-            'cart' => 'https://shop.test/checkout/cart/',
+            'category' => ['url' => 'https://shop.test/cat.html', 'source' => 'auto'],
+            'product' => ['url' => 'https://shop.test/p.html', 'source' => 'pinned'],
+            'cart' => ['url' => 'https://shop.test/checkout/cart/', 'source' => 'auto'],
         ]);
         $timer = $this->createMock(PageTimer::class);
         $timer->method('time')->willReturnMap([
@@ -35,6 +35,7 @@ class PageSpeedReporterTest extends TestCase
         $this->assertArrayNotHasKey('cart_ttfb_ms', $summary);
         $this->assertSame(3, $summary['pages_timed']->getValue());
         $this->assertCount(3, $status['pages']->getRows());
+        $this->assertSame('pinned', $status['pages']->getRows()[1]->getValue()['source']->getValue());
     }
 
     public function testNoPagesWhenDiscoveryFindsNothing(): void

@@ -1,0 +1,27 @@
+<?xml version="1.0"?>
+<config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="urn:magento:module:Magento_Config:etc/system_file.xsd">
+    <system>
+        <section id="stacknuts_stackgauge">
+            <group id="page_speed" translate="label comment" type="text" sortOrder="40" showInDefault="1" showInWebsite="0" showInStore="0">
+                <label>Page Speed Pages</label>
+                <comment>Pages the Page Speed reporter times each hour. Pin a page here for a stable comparison over time; otherwise the busiest category and first product are picked automatically. The URLs actually timed (and whether pinned or automatic) are included in each report.</comment>
+                <field id="category_path" translate="label comment" type="text" sortOrder="10" showInDefault="1" showInWebsite="0" showInStore="0">
+                    <label>Category Page</label>
+                    <comment>Optional. A path on this store (e.g. women/tops.html) or a full URL on the same host. Leave empty to pick one automatically.</comment>
+                </field>
+                <field id="product_path" translate="label comment" type="text" sortOrder="20" showInDefault="1" showInWebsite="0" showInStore="0">
+                    <label>Product Page</label>
+                    <comment>Optional. A path on this store (e.g. my-best-seller.html) or a full URL on the same host. Leave empty to pick one automatically.</comment>
+                </field>
+                <field id="search_path" translate="label comment" type="text" sortOrder="30" showInDefault="1" showInWebsite="0" showInStore="0">
+                    <label>Search Page</label>
+                    <comment>Optional. A path on this store (e.g. catalogsearch/result/?q=shirt) or a full URL on the same host. Leave empty to pick one automatically.</comment>
+                </field>
+                <field id="cart_path" translate="label comment" type="text" sortOrder="40" showInDefault="1" showInWebsite="0" showInStore="0">
+                    <label>Cart Page</label>
+                    <comment>Optional. A path on this store (e.g. checkout/cart/) or a full URL on the same host. Leave empty to pick one automatically.</comment>
+                </field>
+            </group>
+        </section>
+    </system>
+</config>
