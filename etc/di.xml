@@ -10,6 +10,9 @@
                 <item name="mysql_runtime" xsi:type="object">StackNuts\StackGaugePerformance\Model\Reporter\MysqlRuntimeReporter</item>
                 <item name="redis_perf" xsi:type="object">StackNuts\StackGaugePerformance\Model\Reporter\RedisPerformanceReporter</item>
                 <item name="cron_perf" xsi:type="object">StackNuts\StackGaugePerformance\Model\Reporter\CronPerformanceReporter</item>
+                <item name="perf_config" xsi:type="object">StackNuts\StackGaugePerformance\Model\Reporter\PerfConfigReporter</item>
+                <item name="module_hygiene" xsi:type="object">StackNuts\StackGaugePerformance\Model\Reporter\ModuleHygieneReporter</item>
+                <item name="db_footprint" xsi:type="object">StackNuts\StackGaugePerformance\Model\Reporter\DbFootprintReporter</item>
             </argument>
         </arguments>
     </type>
