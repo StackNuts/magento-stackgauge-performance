@@ -13,6 +13,7 @@
                 <item name="perf_config" xsi:type="object">StackNuts\StackGaugePerformance\Model\Reporter\PerfConfigReporter</item>
                 <item name="module_hygiene" xsi:type="object">StackNuts\StackGaugePerformance\Model\Reporter\ModuleHygieneReporter</item>
                 <item name="db_footprint" xsi:type="object">StackNuts\StackGaugePerformance\Model\Reporter\DbFootprintReporter</item>
+                <item name="page_speed" xsi:type="object">StackNuts\StackGaugePerformance\Model\Reporter\PageSpeedReporter</item>
             </argument>
         </arguments>
     </type>
