@@ -1,0 +1,9 @@
+<?xml version="1.0"?>
+<config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="urn:magento:framework:ObjectManager/etc/config.xsd">
+    <!-- Keeps the page_speed search probe out of the store's search term stats. -->
+    <type name="Magento\Search\Model\Query">
+        <plugin name="stacknuts_stackgaugeperformance_skip_probe_search_stats"
+                type="StackNuts\StackGaugePerformance\Plugin\SkipProbeSearchStats"/>
+    </type>
+</config>
