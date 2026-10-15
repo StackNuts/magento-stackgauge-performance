@@ -16,6 +16,7 @@ use StackNuts\StackGauge\Api\MetricCatalogInterface;
 use StackNuts\StackGauge\Api\MetricDefinition;
 use StackNuts\StackGauge\Api\ReporterInterface;
 use StackNuts\StackGauge\Api\Section\Section;
+use StackNuts\StackGauge\Api\Unit;
 use StackNuts\StackGauge\Model\Reporter\Concern\PerformanceSectionTrait;
 use Throwable;
 
@@ -109,7 +110,7 @@ class MysqlRuntimeReporter implements ReporterInterface, DeclaresSectionInterfac
 
         $fields = [
             'status_available' => $this->field->bool('Status Available', true, criticalWhen: false),
-            'uptime_hours' => $this->field->number('Uptime (hours)', (int)floor((int)($status['Uptime'] ?? 0) / 3600)),
+            'uptime_hours' => $this->field->number('Uptime', (int)floor((int)($status['Uptime'] ?? 0) / 3600), unit: Unit::HOURS),
             'max_connections' => $this->field->number('Max Connections', $maxConnections),
             'threads_connected' => $this->field->number('Threads Connected', (int)($status['Threads_connected'] ?? 0)),
             'threads_running' => $this->field->number('Threads Running', (int)($status['Threads_running'] ?? 0)),
@@ -119,8 +120,9 @@ class MysqlRuntimeReporter implements ReporterInterface, DeclaresSectionInterfac
                 in_array(strtoupper((string)($variables['slow_query_log'] ?? '')), ['ON', '1'], true)
             ),
             'innodb_buffer_pool_size_mb' => $this->field->number(
-                'InnoDB Buffer Pool (MB)',
-                (int)round((int)($variables['innodb_buffer_pool_size'] ?? 0) / 1048576)
+                'InnoDB Buffer Pool',
+                (int)round((int)($variables['innodb_buffer_pool_size'] ?? 0) / 1048576),
+                unit: Unit::MEGABYTES
             ),
             'slow_queries' => $this->field->trackableNumber(
                 'Slow Queries (since start)',
@@ -129,26 +131,29 @@ class MysqlRuntimeReporter implements ReporterInterface, DeclaresSectionInterfac
                 MetricDefinition::AGGREGATION_DELTA
             ),
             'tmp_tables_on_disk_pct' => $this->field->number(
-                'Temp Tables On Disk (%)',
-                $tmpTables > 0 ? round(($tmpDisk / $tmpTables) * 100, 2) : 0.0
+                'Temp Tables On Disk',
+                $tmpTables > 0 ? round(($tmpDisk / $tmpTables) * 100, 2) : 0.0,
+                unit: Unit::PERCENT
             ),
         ];
 
         if ($maxConnections > 0) {
             $fields['connection_usage_pct'] = $this->field->trackableNumber(
-                'Peak Connection Usage (%)',
+                'Peak Connection Usage',
                 round(($maxUsed / $maxConnections) * 100, 2),
                 self::METRIC_CONNECTION_USAGE,
-                MetricDefinition::AGGREGATION_MAX
+                MetricDefinition::AGGREGATION_MAX,
+                unit: Unit::PERCENT
             );
         }
 
         if ($poolRequests > 0) {
             $fields['buffer_pool_hit_pct'] = $this->field->trackableNumber(
-                'InnoDB Buffer Pool Hit Rate (%)',
+                'InnoDB Buffer Pool Hit Rate',
                 round((1 - $poolReads / $poolRequests) * 100, 3),
                 self::METRIC_BUFFER_POOL_HIT,
-                MetricDefinition::AGGREGATION_MIN
+                MetricDefinition::AGGREGATION_MIN,
+                unit: Unit::PERCENT
             );
         }
 
@@ -163,14 +168,16 @@ class MysqlRuntimeReporter implements ReporterInterface, DeclaresSectionInterfac
         return [
             new MetricDefinition(
                 self::METRIC_CONNECTION_USAGE,
-                'MySQL: Peak Connection Usage (%)',
+                'MySQL: Peak Connection Usage',
                 MetricDefinition::AGGREGATION_MAX,
                 MetricDefinition::OPERATOR_GT,
                 80,
                 360,
                 null,
-                description: 'MySQL connections peaked at {value}% of max_connections.',
-                impact: 'At 100% new requests fail with "too many connections" errors.'
+                description: 'MySQL connections peaked at {value} of max_connections.',
+                impact: 'At 100% new requests fail with "too many connections" errors.',
+                criticalThreshold: 95,
+                unit: Unit::PERCENT
             ),
             new MetricDefinition(
                 self::METRIC_SLOW_QUERIES,
@@ -185,14 +192,16 @@ class MysqlRuntimeReporter implements ReporterInterface, DeclaresSectionInterfac
             ),
             new MetricDefinition(
                 self::METRIC_BUFFER_POOL_HIT,
-                'MySQL: InnoDB Buffer Pool Hit Rate (%)',
+                'MySQL: InnoDB Buffer Pool Hit Rate',
                 MetricDefinition::AGGREGATION_MIN,
                 MetricDefinition::OPERATOR_LT,
                 95,
                 360,
                 null,
-                description: 'The InnoDB buffer pool hit rate is {value}%.',
-                impact: 'Reads are going to disk instead of memory; the buffer pool is likely undersized.'
+                description: 'The InnoDB buffer pool hit rate is {value}.',
+                impact: 'Reads are going to disk instead of memory; the buffer pool is likely undersized.',
+                criticalThreshold: 90,
+                unit: Unit::PERCENT
             ),
         ];
     }

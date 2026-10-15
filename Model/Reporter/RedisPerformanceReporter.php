@@ -17,6 +17,7 @@ use StackNuts\StackGauge\Api\MetricCatalogInterface;
 use StackNuts\StackGauge\Api\MetricDefinition;
 use StackNuts\StackGauge\Api\ReporterInterface;
 use StackNuts\StackGauge\Api\Section\Section;
+use StackNuts\StackGauge\Api\Unit;
 use StackNuts\StackGauge\Model\Reporter\Concern\PerformanceSectionTrait;
 use Throwable;
 
@@ -113,12 +114,12 @@ class RedisPerformanceReporter implements ReporterInterface, DeclaresSectionInte
 
             $rows[] = $this->field->array($name, [
                 'name' => $this->field->varchar('Name', $name),
-                'used_memory_mb' => $this->field->number('Used Memory (MB)', (int)round($used / 1048576)),
-                'maxmemory_mb' => $this->field->number('Max Memory (MB)', (int)round($max / 1048576)),
-                'memory_used_pct' => $this->field->number('Memory Used (%)', $memoryPct ?? 0.0),
+                'used_memory_mb' => $this->field->number('Used Memory', (int)round($used / 1048576), unit: Unit::MEGABYTES),
+                'maxmemory_mb' => $this->field->number('Max Memory', (int)round($max / 1048576), unit: Unit::MEGABYTES),
+                'memory_used_pct' => $this->field->number('Memory Used', $memoryPct ?? 0.0, unit: Unit::PERCENT),
                 'maxmemory_policy' => $this->field->varchar('Eviction Policy', (string)($info['maxmemory_policy'] ?? '')),
                 'evicted_keys' => $this->field->number('Evicted Keys', (int)($info['evicted_keys'] ?? 0)),
-                'hit_rate' => $this->field->number('Hit Rate (%)', $hitRate ?? 0.0),
+                'hit_rate' => $this->field->number('Hit Rate', $hitRate ?? 0.0, unit: Unit::PERCENT),
                 'connected_clients' => $this->field->number('Connected Clients', (int)($info['connected_clients'] ?? 0)),
             ]);
         }
@@ -132,18 +133,20 @@ class RedisPerformanceReporter implements ReporterInterface, DeclaresSectionInte
         );
         if ($maxMemoryPct !== null) {
             $summary['memory_used_pct'] = $this->field->trackableNumber(
-                'Peak Memory Used (%)',
+                'Peak Memory Used',
                 $maxMemoryPct,
                 self::METRIC_MEMORY_USED,
-                MetricDefinition::AGGREGATION_MAX
+                MetricDefinition::AGGREGATION_MAX,
+                unit: Unit::PERCENT
             );
         }
         if ($minHitRate !== null) {
             $summary['hit_rate'] = $this->field->trackableNumber(
-                'Lowest Hit Rate (%)',
+                'Lowest Hit Rate',
                 $minHitRate,
                 self::METRIC_HIT_RATE,
-                MetricDefinition::AGGREGATION_MIN
+                MetricDefinition::AGGREGATION_MIN,
+                unit: Unit::PERCENT
             );
         }
 
@@ -161,14 +164,16 @@ class RedisPerformanceReporter implements ReporterInterface, DeclaresSectionInte
         return [
             new MetricDefinition(
                 self::METRIC_MEMORY_USED,
-                'Redis: Peak Memory Used (%)',
+                'Redis: Peak Memory Used',
                 MetricDefinition::AGGREGATION_MAX,
                 MetricDefinition::OPERATOR_GT,
                 90,
                 360,
                 null,
-                description: 'A Redis instance is {value}% of its memory limit.',
-                impact: 'Near the limit Redis evicts cache entries (or refuses writes), hurting hit rate and speed.'
+                description: 'A Redis instance is {value} of its memory limit.',
+                impact: 'Near the limit Redis evicts cache entries (or refuses writes), hurting hit rate and speed.',
+                criticalThreshold: 98,
+                unit: Unit::PERCENT
             ),
             new MetricDefinition(
                 self::METRIC_EVICTED_KEYS,
@@ -183,14 +188,16 @@ class RedisPerformanceReporter implements ReporterInterface, DeclaresSectionInte
             ),
             new MetricDefinition(
                 self::METRIC_HIT_RATE,
-                'Redis: Lowest Hit Rate (%)',
+                'Redis: Lowest Hit Rate',
                 MetricDefinition::AGGREGATION_MIN,
                 MetricDefinition::OPERATOR_LT,
                 80,
                 360,
                 null,
-                description: 'A Redis instance has a hit rate of {value}%.',
-                impact: 'Most cache lookups are missing, so Magento is regenerating content on nearly every request.'
+                description: 'A Redis instance has a hit rate of {value}.',
+                impact: 'Most cache lookups are missing, so Magento is regenerating content on nearly every request.',
+                criticalThreshold: 50,
+                unit: Unit::PERCENT
             ),
         ];
     }

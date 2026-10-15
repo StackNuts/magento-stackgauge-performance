@@ -17,6 +17,7 @@ use StackNuts\StackGauge\Api\DeclaresSectionInterface;
 use StackNuts\StackGauge\Api\Field\Field;
 use StackNuts\StackGauge\Api\ReporterInterface;
 use StackNuts\StackGauge\Api\Section\Section;
+use StackNuts\StackGauge\Api\Unit;
 use StackNuts\StackGauge\Model\Reporter\Concern\DailyCadenceTrait;
 use StackNuts\StackGauge\Model\Reporter\Concern\PerformanceSectionTrait;
 
@@ -118,9 +119,10 @@ class PerfConfigReporter implements ReporterInterface, DeclaresCadenceInterface,
                 criticalWhen: true
             ),
             'fpc_ttl_seconds' => $this->field->number(
-                'Full Page Cache TTL (s)',
+                'Full Page Cache TTL',
                 $fpcTtl,
-                $fpcTtl > 0 && $fpcTtl < self::MIN_FPC_TTL_SECONDS ? Field::SEVERITY_WARNING : null
+                $fpcTtl > 0 && $fpcTtl < self::MIN_FPC_TTL_SECONDS ? Field::SEVERITY_WARNING : null,
+                unit: Unit::SECONDS
             ),
             'cache_backend_is_file_based' => $this->field->bool(
                 'Cache Backend Is File-based',

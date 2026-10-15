@@ -15,6 +15,7 @@ use StackNuts\StackGauge\Api\MetricCatalogInterface;
 use StackNuts\StackGauge\Api\MetricDefinition;
 use StackNuts\StackGauge\Api\ReporterInterface;
 use StackNuts\StackGauge\Api\Section\Section;
+use StackNuts\StackGauge\Api\Unit;
 use StackNuts\StackGauge\Model\Reporter\Concern\PerformanceSectionTrait;
 use StackNuts\StackGaugePerformance\Model\Probe\KeyPageDiscovery;
 use StackNuts\StackGaugePerformance\Model\Probe\PageTimer;
@@ -99,10 +100,11 @@ class PageSpeedReporter implements ReporterInterface, DeclaresSectionInterface, 
 
             if ($responded && isset(self::METRIC_LABELS[$type])) {
                 $summary[$type . '_ttfb_ms'] = $this->field->trackableNumber(
-                    self::METRIC_LABELS[$type] . ' TTFB (ms)',
+                    self::METRIC_LABELS[$type] . ' TTFB',
                     $result['ttfb_ms'],
                     self::METRIC_PREFIX . $type . '_ttfb_ms',
-                    MetricDefinition::AGGREGATION_AVG
+                    MetricDefinition::AGGREGATION_AVG,
+                    unit: Unit::MILLISECONDS
                 );
             }
 
@@ -111,8 +113,8 @@ class PageSpeedReporter implements ReporterInterface, DeclaresSectionInterface, 
                 'url' => $this->field->varchar('URL', $url),
                 'source' => $this->field->varchar('Source', $page['source']),
                 'http_status' => $this->field->number('HTTP Status', $result['status']),
-                'ttfb_ms' => $this->field->number('TTFB (ms)', $result['ttfb_ms']),
-                'total_ms' => $this->field->number('Total (ms)', $result['total_ms']),
+                'ttfb_ms' => $this->field->number('TTFB', $result['ttfb_ms'], unit: Unit::MILLISECONDS),
+                'total_ms' => $this->field->number('Total', $result['total_ms'], unit: Unit::MILLISECONDS),
                 'cache' => $this->field->varchar('Cache', $result['cache']),
             ]);
         }
@@ -134,14 +136,16 @@ class PageSpeedReporter implements ReporterInterface, DeclaresSectionInterface, 
         foreach (self::METRIC_LABELS as $type => $label) {
             $metrics[] = new MetricDefinition(
                 self::METRIC_PREFIX . $type . '_ttfb_ms',
-                'Page Speed: ' . $label . ' TTFB (ms)',
+                'Page Speed: ' . $label . ' TTFB',
                 MetricDefinition::AGGREGATION_AVG,
                 MetricDefinition::OPERATOR_GT,
                 $type === 'cart' ? 1500 : 1000,
                 180,
                 null,
-                description: 'The ' . strtolower($label) . ' page took {value} ms to start responding.',
-                impact: 'Slow server response delays every visitor on this page type before anything renders.'
+                description: 'The ' . strtolower($label) . ' page took {value} to start responding.',
+                impact: 'Slow server response delays every visitor on this page type before anything renders.',
+                criticalThreshold: $type === 'cart' ? 4000 : 3000,
+                unit: Unit::MILLISECONDS
             );
         }
 

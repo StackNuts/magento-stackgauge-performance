@@ -17,6 +17,7 @@ use StackNuts\StackGauge\Api\MetricCatalogInterface;
 use StackNuts\StackGauge\Api\MetricDefinition;
 use StackNuts\StackGauge\Api\ReporterInterface;
 use StackNuts\StackGauge\Api\Section\Section;
+use StackNuts\StackGauge\Api\Unit;
 use StackNuts\StackGauge\Model\Reporter\Concern\DailyCadenceTrait;
 use StackNuts\StackGauge\Model\Reporter\Concern\PerformanceSectionTrait;
 use Throwable;
@@ -125,7 +126,7 @@ class DbFootprintReporter implements
             $rows[] = $this->field->array($table['name'], [
                 'name' => $this->field->varchar('Table', $table['name']),
                 'rows' => $this->field->number('Rows (estimate)', (int)$table['table_rows']),
-                'size_mb' => $this->field->number('Size (MB)', (float)$table['size_mb']),
+                'size_mb' => $this->field->number('Size', (float)$table['size_mb'], unit: Unit::MEGABYTES),
             ]);
         }
 
@@ -133,12 +134,13 @@ class DbFootprintReporter implements
             'summary' => $this->section->facts('summary', 'Summary', $this->getDescription(), [
                 'footprint_available' => $this->field->bool('Footprint Available', true, criticalWhen: false),
                 'table_count' => $this->field->number('Tables', count($tables)),
-                'total_size_mb' => $this->field->number('Total Size (MB)', round($total, 1)),
+                'total_size_mb' => $this->field->number('Total Size', round($total, 1), unit: Unit::MEGABYTES),
                 'housekeeping_tables_mb' => $this->field->trackableNumber(
-                    'Prunable Log Tables (MB)',
+                    'Prunable Log Tables',
                     round($housekeepingMb, 1),
                     self::METRIC_HOUSEKEEPING_MB,
-                    MetricDefinition::AGGREGATION_MAX
+                    MetricDefinition::AGGREGATION_MAX,
+                    unit: Unit::MEGABYTES
                 ),
             ]),
             'largest_tables' => $this->section->table(
@@ -158,14 +160,16 @@ class DbFootprintReporter implements
         return [
             new MetricDefinition(
                 self::METRIC_HOUSEKEEPING_MB,
-                'Database: Prunable Log Tables (MB)',
+                'Database: Prunable Log Tables',
                 MetricDefinition::AGGREGATION_MAX,
                 MetricDefinition::OPERATOR_GT,
                 1024,
                 1440,
                 null,
-                description: 'Log and housekeeping tables have grown to {value} MB.',
-                impact: 'Unpruned logs bloat backups and slow queries; check cleanup cron and retention settings.'
+                description: 'Log and housekeeping tables have grown to {value}.',
+                impact: 'Unpruned logs bloat backups and slow queries; check cleanup cron and retention settings.',
+                criticalThreshold: 5120,
+                unit: Unit::MEGABYTES
             ),
         ];
     }

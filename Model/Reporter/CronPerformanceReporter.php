@@ -16,6 +16,7 @@ use StackNuts\StackGauge\Api\MetricCatalogInterface;
 use StackNuts\StackGauge\Api\MetricDefinition;
 use StackNuts\StackGauge\Api\ReporterInterface;
 use StackNuts\StackGauge\Api\Section\Section;
+use StackNuts\StackGauge\Api\Unit;
 use StackNuts\StackGauge\Model\Reporter\Concern\PerformanceSectionTrait;
 use Throwable;
 
@@ -119,21 +120,24 @@ class CronPerformanceReporter implements ReporterInterface, DeclaresSectionInter
         return ['general' => $this->section->facts('general', 'General', $this->getDescription(), [
             'history_available' => $this->field->bool('Cron History Available', true, criticalWhen: false),
             'max_job_duration_seconds' => $this->field->trackableNumber(
-                'Longest Job Duration (s)',
+                'Longest Job Duration',
                 (int)($stats['max_duration'] ?? 0),
                 self::METRIC_MAX_DURATION,
-                MetricDefinition::AGGREGATION_MAX
+                MetricDefinition::AGGREGATION_MAX,
+                unit: Unit::SECONDS
             ),
             'slowest_job_code' => $this->field->varchar('Slowest Job', $slowest),
             'avg_job_duration_seconds' => $this->field->number(
-                'Average Job Duration (s)',
-                round((float)($stats['avg_duration'] ?? 0), 1)
+                'Average Job Duration',
+                round((float)($stats['avg_duration'] ?? 0), 1),
+                unit: Unit::SECONDS
             ),
             'schedule_lag_seconds' => $this->field->trackableNumber(
-                'Longest Start Lateness (s)',
+                'Longest Start Lateness',
                 (int)($stats['lag'] ?? 0),
                 self::METRIC_SCHEDULE_LAG,
-                MetricDefinition::AGGREGATION_MAX
+                MetricDefinition::AGGREGATION_MAX,
+                unit: Unit::SECONDS
             ),
             'stuck_jobs' => $this->field->trackableNumber(
                 'Stuck Running Jobs',
@@ -159,14 +163,16 @@ class CronPerformanceReporter implements ReporterInterface, DeclaresSectionInter
         return [
             new MetricDefinition(
                 self::METRIC_MAX_DURATION,
-                'Cron: Longest Job Duration (s)',
+                'Cron: Longest Job Duration',
                 MetricDefinition::AGGREGATION_MAX,
                 MetricDefinition::OPERATOR_GT,
                 900,
                 120,
                 null,
-                description: 'A cron job ran for {value} seconds.',
-                impact: 'Long-running jobs delay everything queued behind them in the same cron group.'
+                description: 'A cron job ran for {value}.',
+                impact: 'Long-running jobs delay everything queued behind them in the same cron group.',
+                criticalThreshold: 3600,
+                unit: Unit::SECONDS
             ),
             new MetricDefinition(
                 self::METRIC_STUCK_JOBS,
@@ -181,14 +187,16 @@ class CronPerformanceReporter implements ReporterInterface, DeclaresSectionInter
             ),
             new MetricDefinition(
                 self::METRIC_SCHEDULE_LAG,
-                'Cron: Longest Start Lateness (s)',
+                'Cron: Longest Start Lateness',
                 MetricDefinition::AGGREGATION_MAX,
                 MetricDefinition::OPERATOR_GT,
                 900,
                 120,
                 null,
-                description: 'A cron job is {value} seconds past its scheduled start.',
-                impact: 'Cron is falling behind, so indexing, emails and queues are delayed.'
+                description: 'A cron job is {value} past its scheduled start.',
+                impact: 'Cron is falling behind, so indexing, emails and queues are delayed.',
+                criticalThreshold: 3600,
+                unit: Unit::SECONDS
             ),
             new MetricDefinition(
                 self::METRIC_ERROR_JOBS,
@@ -199,7 +207,8 @@ class CronPerformanceReporter implements ReporterInterface, DeclaresSectionInter
                 120,
                 null,
                 description: '{value} cron job(s) ended in error recently.',
-                impact: 'Failing jobs mean scheduled work (indexing, imports, emails) is not completing.'
+                impact: 'Failing jobs mean scheduled work (indexing, imports, emails) is not completing.',
+                criticalThreshold: 20
             ),
         ];
     }

@@ -14,6 +14,7 @@ use StackNuts\StackGauge\Api\MetricCatalogInterface;
 use StackNuts\StackGauge\Api\MetricDefinition;
 use StackNuts\StackGauge\Api\ReporterInterface;
 use StackNuts\StackGauge\Api\Section\Section;
+use StackNuts\StackGauge\Api\Unit;
 use StackNuts\StackGauge\Model\Reporter\Concern\PerformanceSectionTrait;
 use StackNuts\StackGaugePerformance\Model\Runtime\WebRuntimeStore;
 
@@ -96,38 +97,43 @@ class PhpRuntimeReporter implements ReporterInterface, DeclaresSectionInterface,
         $fields = [
             'snapshot_available' => $this->field->bool('Snapshot Available', true),
             'snapshot_age_minutes' => $this->field->number(
-                'Snapshot Age (minutes)',
-                max(0, (int)floor((time() - (int)($snapshot['collected_at'] ?? time())) / 60))
+                'Snapshot Age',
+                max(0, (int)floor((time() - (int)($snapshot['collected_at'] ?? time())) / 60)),
+                unit: Unit::MINUTES
             ),
             'php_version' => $this->field->varchar('PHP Version', (string)($snapshot['php_version'] ?? '')),
             'sapi' => $this->field->varchar('SAPI', (string)($snapshot['sapi'] ?? '')),
             'memory_limit' => $this->field->varchar('Memory Limit', (string)($snapshot['memory_limit'] ?? '')),
             'opcache_enabled' => $this->field->bool('OPcache Enabled', is_array($opcache), criticalWhen: false),
-            'realpath_cache_used_pct' => $this->field->number('Realpath Cache Used (%)', $realpathPct),
+            'realpath_cache_used_pct' => $this->field->number('Realpath Cache Used', $realpathPct, unit: Unit::PERCENT),
         ];
 
         if (is_array($opcache)) {
             $fields += [
                 'opcache_hit_rate' => $this->field->trackableNumber(
-                    'OPcache Hit Rate (%)',
+                    'OPcache Hit Rate',
                     (float)$opcache['hit_rate'],
                     self::METRIC_HIT_RATE,
-                    MetricDefinition::AGGREGATION_MIN
+                    MetricDefinition::AGGREGATION_MIN,
+                    unit: Unit::PERCENT
                 ),
                 'opcache_memory_used_pct' => $this->field->trackableNumber(
-                    'OPcache Memory Used (%)',
+                    'OPcache Memory Used',
                     (float)$opcache['memory_used_pct'],
                     self::METRIC_MEMORY_USED,
-                    MetricDefinition::AGGREGATION_MAX
+                    MetricDefinition::AGGREGATION_MAX,
+                    unit: Unit::PERCENT
                 ),
-                'opcache_wasted_pct' => $this->field->number('OPcache Wasted (%)', (float)$opcache['wasted_pct']),
+                'opcache_wasted_pct' => $this->field->number('OPcache Wasted', (float)$opcache['wasted_pct'], unit: Unit::PERCENT),
                 'opcache_keys_used_pct' => $this->field->number(
-                    'OPcache Keys Used (%)',
-                    (float)$opcache['keys_used_pct']
+                    'OPcache Keys Used',
+                    (float)$opcache['keys_used_pct'],
+                    unit: Unit::PERCENT
                 ),
                 'opcache_interned_strings_used_pct' => $this->field->number(
-                    'OPcache Interned Strings Used (%)',
-                    (float)$opcache['interned_strings_used_pct']
+                    'OPcache Interned Strings Used',
+                    (float)$opcache['interned_strings_used_pct'],
+                    unit: Unit::PERCENT
                 ),
                 'opcache_cached_scripts' => $this->field->number('OPcache Cached Scripts', (int)$opcache['cached_scripts']),
                 'opcache_oom_restarts' => $this->field->trackableNumber(
@@ -157,25 +163,29 @@ class PhpRuntimeReporter implements ReporterInterface, DeclaresSectionInterface,
         return [
             new MetricDefinition(
                 self::METRIC_HIT_RATE,
-                'PHP Runtime: OPcache Hit Rate (%)',
+                'PHP Runtime: OPcache Hit Rate',
                 MetricDefinition::AGGREGATION_MIN,
                 MetricDefinition::OPERATOR_LT,
                 95,
                 360,
                 null,
-                description: 'OPcache hit rate fell to {value}%.',
-                impact: 'PHP is recompiling scripts on many requests, which slows every page.'
+                description: 'OPcache hit rate fell to {value}.',
+                impact: 'PHP is recompiling scripts on many requests, which slows every page.',
+                criticalThreshold: 80,
+                unit: Unit::PERCENT
             ),
             new MetricDefinition(
                 self::METRIC_MEMORY_USED,
-                'PHP Runtime: OPcache Memory Used (%)',
+                'PHP Runtime: OPcache Memory Used',
                 MetricDefinition::AGGREGATION_MAX,
                 MetricDefinition::OPERATOR_GT,
                 90,
                 360,
                 null,
-                description: 'OPcache memory is {value}% full.',
-                impact: 'Once full, OPcache restarts or stops caching scripts and response times degrade sharply.'
+                description: 'OPcache memory is {value} full.',
+                impact: 'Once full, OPcache restarts or stops caching scripts and response times degrade sharply.',
+                criticalThreshold: 98,
+                unit: Unit::PERCENT
             ),
             new MetricDefinition(
                 self::METRIC_OOM_RESTARTS,
