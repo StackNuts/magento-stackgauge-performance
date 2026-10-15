@@ -58,10 +58,34 @@ class PhpRuntimeReporterTest extends TestCase
         $this->assertArrayNotHasKey('opcache_hit_rate', $fields);
     }
 
-    public function testDeclaresThreeMetricsMatchingItsFields(): void
+    public function testDeclaresSevenMetricsMatchingItsFields(): void
     {
         $reporter = new PhpRuntimeReporter($this->createMock(WebRuntimeStore::class), new Field(), new Section());
 
-        $this->assertCount(3, $reporter->getTrackableMetrics());
+        $this->assertCount(7, $reporter->getTrackableMetrics());
+    }
+
+    public function testRealpathCacheUsedPctIsTrackable(): void
+    {
+        $store = $this->createMock(WebRuntimeStore::class);
+        $store->method('read')->willReturn([
+            'collected_at' => time(),
+            'realpath_cache' => ['used_bytes' => 512, 'limit_bytes' => 1024],
+            'opcache' => [
+                'hit_rate' => 99.5, 'memory_used_pct' => 42.0, 'wasted_pct' => 1.0, 'keys_used_pct' => 10.0,
+                'interned_strings_used_pct' => 20.0, 'cached_scripts' => 5000, 'oom_restarts' => 0,
+                'cache_full' => false, 'validate_timestamps' => false, 'jit_enabled' => false,
+            ],
+        ]);
+
+        $fields = (new PhpRuntimeReporter($store, new Field(), new Section()))->getStatus()['general']->getFields();
+
+        $this->assertSame('php_runtime.realpath_cache_used_pct', $fields['realpath_cache_used_pct']->getMetricKey());
+        $this->assertSame('php_runtime.opcache_wasted_pct', $fields['opcache_wasted_pct']->getMetricKey());
+        $this->assertSame('php_runtime.opcache_keys_used_pct', $fields['opcache_keys_used_pct']->getMetricKey());
+        $this->assertSame(
+            'php_runtime.opcache_interned_strings_used_pct',
+            $fields['opcache_interned_strings_used_pct']->getMetricKey()
+        );
     }
 }

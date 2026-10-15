@@ -31,6 +31,10 @@ class PhpRuntimeReporter implements ReporterInterface, DeclaresSectionInterface,
     private const METRIC_HIT_RATE = 'php_runtime.opcache_hit_rate';
     private const METRIC_MEMORY_USED = 'php_runtime.opcache_memory_used_pct';
     private const METRIC_OOM_RESTARTS = 'php_runtime.opcache_oom_restarts';
+    private const METRIC_WASTED = 'php_runtime.opcache_wasted_pct';
+    private const METRIC_KEYS_USED = 'php_runtime.opcache_keys_used_pct';
+    private const METRIC_INTERNED_STRINGS_USED = 'php_runtime.opcache_interned_strings_used_pct';
+    private const METRIC_REALPATH_CACHE_USED = 'php_runtime.realpath_cache_used_pct';
 
     /**
      * @param WebRuntimeStore $store
@@ -105,7 +109,13 @@ class PhpRuntimeReporter implements ReporterInterface, DeclaresSectionInterface,
             'sapi' => $this->field->varchar('SAPI', (string)($snapshot['sapi'] ?? '')),
             'memory_limit' => $this->field->varchar('Memory Limit', (string)($snapshot['memory_limit'] ?? '')),
             'opcache_enabled' => $this->field->bool('OPcache Enabled', is_array($opcache), criticalWhen: false),
-            'realpath_cache_used_pct' => $this->field->number('Realpath Cache Used', $realpathPct, unit: Unit::PERCENT),
+            'realpath_cache_used_pct' => $this->field->trackableNumber(
+                'Realpath Cache Used',
+                $realpathPct,
+                self::METRIC_REALPATH_CACHE_USED,
+                MetricDefinition::AGGREGATION_MAX,
+                unit: Unit::PERCENT
+            ),
         ];
 
         if (is_array($opcache)) {
@@ -124,25 +134,42 @@ class PhpRuntimeReporter implements ReporterInterface, DeclaresSectionInterface,
                     MetricDefinition::AGGREGATION_MAX,
                     unit: Unit::PERCENT
                 ),
-                'opcache_wasted_pct' => $this->field->number('OPcache Wasted', (float)$opcache['wasted_pct'], unit: Unit::PERCENT),
-                'opcache_keys_used_pct' => $this->field->number(
+                'opcache_wasted_pct' => $this->field->trackableNumber(
+                    'OPcache Wasted',
+                    (float)$opcache['wasted_pct'],
+                    self::METRIC_WASTED,
+                    MetricDefinition::AGGREGATION_MAX,
+                    unit: Unit::PERCENT
+                ),
+                'opcache_keys_used_pct' => $this->field->trackableNumber(
                     'OPcache Keys Used',
                     (float)$opcache['keys_used_pct'],
+                    self::METRIC_KEYS_USED,
+                    MetricDefinition::AGGREGATION_MAX,
                     unit: Unit::PERCENT
                 ),
-                'opcache_interned_strings_used_pct' => $this->field->number(
+                'opcache_interned_strings_used_pct' => $this->field->trackableNumber(
                     'OPcache Interned Strings Used',
                     (float)$opcache['interned_strings_used_pct'],
+                    self::METRIC_INTERNED_STRINGS_USED,
+                    MetricDefinition::AGGREGATION_MAX,
                     unit: Unit::PERCENT
                 ),
-                'opcache_cached_scripts' => $this->field->number('OPcache Cached Scripts', (int)$opcache['cached_scripts']),
+                'opcache_cached_scripts' => $this->field->number(
+                    'OPcache Cached Scripts',
+                    (int)$opcache['cached_scripts']
+                ),
                 'opcache_oom_restarts' => $this->field->trackableNumber(
                     'OPcache Out-of-Memory Restarts',
                     (int)$opcache['oom_restarts'],
                     self::METRIC_OOM_RESTARTS,
                     MetricDefinition::AGGREGATION_DELTA
                 ),
-                'opcache_cache_full' => $this->field->bool('OPcache Full', (bool)$opcache['cache_full'], criticalWhen: true),
+                'opcache_cache_full' => $this->field->bool(
+                    'OPcache Full',
+                    (bool)$opcache['cache_full'],
+                    criticalWhen: true
+                ),
                 'opcache_validate_timestamps' => $this->field->bool(
                     'OPcache Validates Timestamps',
                     (bool)$opcache['validate_timestamps'],
@@ -156,7 +183,13 @@ class PhpRuntimeReporter implements ReporterInterface, DeclaresSectionInterface,
     }
 
     /**
-     * Alertable metrics: low hit rate, near-full OPcache memory, and out-of-memory restarts.
+     * Alertable metrics: low hit rate, near-full OPcache memory, out-of-memory restarts, plus
+     * three more OPcache/realpath-cache pressure percentages (added 2026-10) whose thresholds
+     * mirror METRIC_MEMORY_USED's existing "90% full" style - a percentage-of-a-configured-
+     * limit metric generalizes across server sizes the same way memory_used_pct already does.
+     * Deliberately did not promote opcache_cached_scripts the same way: it's an absolute
+     * script count, meaningless without knowing the codebase's actual file count, so no
+     * universal threshold exists for it the way it does for these percentage metrics.
      */
     public function getTrackableMetrics(): array
     {
@@ -197,6 +230,60 @@ class PhpRuntimeReporter implements ReporterInterface, DeclaresSectionInterface,
                 null,
                 description: 'OPcache restarted {value} time(s) because it ran out of memory.',
                 impact: 'Each restart empties the compiled-script cache, causing a burst of slow requests.'
+            ),
+            new MetricDefinition(
+                self::METRIC_WASTED,
+                'PHP Runtime: OPcache Wasted',
+                MetricDefinition::AGGREGATION_MAX,
+                MetricDefinition::OPERATOR_GT,
+                20,
+                360,
+                null,
+                description: 'OPcache wasted memory reached {value}.',
+                impact: 'Wasted memory only clears on a restart - high waste means OPcache is close '
+                    . 'to needing one, with the same slow-request burst an out-of-memory restart causes.',
+                unit: Unit::PERCENT
+            ),
+            new MetricDefinition(
+                self::METRIC_KEYS_USED,
+                'PHP Runtime: OPcache Keys Used',
+                MetricDefinition::AGGREGATION_MAX,
+                MetricDefinition::OPERATOR_GT,
+                90,
+                360,
+                null,
+                description: 'OPcache key slots are {value} full.',
+                impact: 'Once full, OPcache stops caching new scripts (max_accelerated_files reached) '
+                    . 'and falls back to recompiling them on every request.',
+                criticalThreshold: 98,
+                unit: Unit::PERCENT
+            ),
+            new MetricDefinition(
+                self::METRIC_INTERNED_STRINGS_USED,
+                'PHP Runtime: OPcache Interned Strings Used',
+                MetricDefinition::AGGREGATION_MAX,
+                MetricDefinition::OPERATOR_GT,
+                90,
+                360,
+                null,
+                description: 'OPcache interned-strings buffer is {value} full.',
+                impact: 'Once full, new strings can no longer be interned, increasing memory use '
+                    . 'and GC pressure on every request.',
+                criticalThreshold: 98,
+                unit: Unit::PERCENT
+            ),
+            new MetricDefinition(
+                self::METRIC_REALPATH_CACHE_USED,
+                'PHP Runtime: Realpath Cache Used',
+                MetricDefinition::AGGREGATION_MAX,
+                MetricDefinition::OPERATOR_GT,
+                90,
+                360,
+                null,
+                description: 'The realpath cache is {value} full.',
+                impact: 'Once full, PHP falls back to real filesystem lookups for paths that no '
+                    . 'longer fit, slowing file includes on every request.',
+                unit: Unit::PERCENT
             ),
         ];
     }
