@@ -22,7 +22,7 @@ Running tests
 
 3. If you are working with a Magento 2 instance using the Mark Shust Docker setup, run the tests from the Magento project root with:
 
-   cd /root/magento-project
+   cd /path/to/your/magento-project
    ./bin/clinotty bash -lc '/var/www/html/vendor/bin/phpunit /var/www/html/app/code/StackNuts/StackGaugePerformance/Test/Unit --debug'
 
 4. For a Magento integration environment, install the module into a Magento project (alongside StackNuts_StackGauge) and run the relevant Magento test commands from there.
