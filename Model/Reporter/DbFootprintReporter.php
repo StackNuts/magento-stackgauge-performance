@@ -150,8 +150,7 @@ class DbFootprintReporter implements
                     'Prunable Log Tables',
                     round($housekeepingMb, 1),
                     self::METRIC_HOUSEKEEPING_MB,
-                    MetricDefinition::AGGREGATION_MAX,
-                    unit: Unit::MEGABYTES
+                    MetricDefinition::AGGREGATION_MAX
                 ),
                 'non_innodb_tables' => $this->field->trackableNumber(
                     'Non-InnoDB Tables',

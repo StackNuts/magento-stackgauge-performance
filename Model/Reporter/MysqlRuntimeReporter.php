@@ -144,8 +144,7 @@ class MysqlRuntimeReporter implements ReporterInterface, DeclaresSectionInterfac
                 'Peak Connection Usage',
                 round(($maxUsed / $maxConnections) * 100, 2),
                 self::METRIC_CONNECTION_USAGE,
-                MetricDefinition::AGGREGATION_MAX,
-                unit: Unit::PERCENT
+                MetricDefinition::AGGREGATION_MAX
             );
         }
 
@@ -164,8 +163,7 @@ class MysqlRuntimeReporter implements ReporterInterface, DeclaresSectionInterfac
                 'InnoDB Buffer Pool Hit Rate',
                 round((1 - $poolReads / $poolRequests) * 100, 3),
                 self::METRIC_BUFFER_POOL_HIT,
-                MetricDefinition::AGGREGATION_MIN,
-                unit: Unit::PERCENT
+                MetricDefinition::AGGREGATION_MIN
             );
         }
 

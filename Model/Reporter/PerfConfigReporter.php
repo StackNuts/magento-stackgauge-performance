@@ -16,6 +16,8 @@ use Magento\Framework\Indexer\IndexerRegistry;
 use StackNuts\StackGauge\Api\DeclaresCadenceInterface;
 use StackNuts\StackGauge\Api\DeclaresSectionInterface;
 use StackNuts\StackGauge\Api\Field\Field;
+use StackNuts\StackGauge\Api\MetricCatalogInterface;
+use StackNuts\StackGauge\Api\MetricDefinition;
 use StackNuts\StackGauge\Api\ReporterInterface;
 use StackNuts\StackGauge\Api\Section\Section;
 use StackNuts\StackGauge\Api\Unit;
@@ -28,12 +30,20 @@ use StackNuts\StackGauge\Model\Reporter\Concern\PerformanceSectionTrait;
  * storage. Display-only - these are one-off setup decisions, not values that drift hourly.
  * Minification is covered by the security module's config hygiene reporter, not repeated here.
  */
-class PerfConfigReporter implements ReporterInterface, DeclaresCadenceInterface, DeclaresSectionInterface
+class PerfConfigReporter implements ReporterInterface, DeclaresCadenceInterface, DeclaresSectionInterface, MetricCatalogInterface
 {
     use DailyCadenceTrait;
     use PerformanceSectionTrait;
 
     private const SCHEMA_VERSION = '1.0';
+
+    /**
+     * Yes/no findings the dashboard alerts on while true - see getTrackableMetrics().
+     */
+    private const FINDING_DEBUG_LOGGING = 'perf_config.debug_logging_in_production';
+    private const FINDING_DB_PROFILER = 'perf_config.db_profiler_enabled';
+    private const FINDING_SHARED_REDIS = 'perf_config.shared_redis_database';
+    private const FINDING_CUSTOMER_GRID = 'perf_config.customer_grid_not_update_on_save';
     private const FPC_BUILT_IN = 1;
     private const FPC_VARNISH = 2;
     private const MIN_FPC_TTL_SECONDS = 86400;
@@ -159,17 +169,20 @@ class PerfConfigReporter implements ReporterInterface, DeclaresCadenceInterface,
                 $this->deployMode() === State::MODE_PRODUCTION && $this->isEnabledSetting(
                     $this->deploymentConfig->get('dev/debug/debug_logging')
                 ),
-                criticalWhen: true
+                criticalWhen: true,
+                metricKey: self::FINDING_DEBUG_LOGGING
             ),
             'db_profiler_enabled' => $this->field->bool(
                 'Database Profiler Enabled',
                 $this->dbProfilerEnabled(),
-                criticalWhen: true
+                criticalWhen: true,
+                metricKey: self::FINDING_DB_PROFILER
             ),
             'shared_redis_database' => $this->field->bool(
                 'Cache And Sessions Share A Redis Database',
                 $this->hasSharedRedisDatabase(),
-                criticalWhen: true
+                criticalWhen: true,
+                metricKey: self::FINDING_SHARED_REDIS
             ),
             'l2_cache_enabled' => $this->field->bool(
                 'L2 Cache Enabled',
@@ -182,7 +195,8 @@ class PerfConfigReporter implements ReporterInterface, DeclaresCadenceInterface,
             $fields['customer_grid_not_update_on_save'] = $this->field->bool(
                 'Customer Grid Not On "Update on Save"',
                 $customerGridScheduled,
-                criticalWhen: true
+                criticalWhen: true,
+                metricKey: self::FINDING_CUSTOMER_GRID
             );
         }
 
@@ -352,5 +366,44 @@ class PerfConfigReporter implements ReporterInterface, DeclaresCadenceInterface,
             $this->scopeConfig->isSetFlag($path, AppScopeInterface::SCOPE_DEFAULT),
             criticalWhen: false
         );
+    }
+
+    /**
+     * This reporter's alertable findings - each the bool field of the same metric key.
+     *
+     * @return MetricDefinition[]
+     */
+    public function getTrackableMetrics(): array
+    {
+        return [
+            MetricDefinition::finding(
+                self::FINDING_DEBUG_LOGGING,
+                'Performance Config: Debug Logging On In Production',
+                MetricDefinition::SEVERITY_WARNING,
+                'Debug logging is switched on while the store is in production mode.',
+                'Debug logs grow quickly, slow every request that writes to them and can capture customer data.'
+            ),
+            MetricDefinition::finding(
+                self::FINDING_DB_PROFILER,
+                'Performance Config: Database Profiler Enabled',
+                MetricDefinition::SEVERITY_WARNING,
+                'The database query profiler is switched on in env.php.',
+                'The profiler records every query in memory, which slows all pages and uses extra memory.'
+            ),
+            MetricDefinition::finding(
+                self::FINDING_SHARED_REDIS,
+                'Performance Config: Cache And Sessions Share A Redis Database',
+                MetricDefinition::SEVERITY_WARNING,
+                'The cache, page cache and sessions are not each using their own Redis database.',
+                'Flushing the cache can also wipe sessions and carts, logging customers out, and memory evictions hit all of them at once.'
+            ),
+            MetricDefinition::finding(
+                self::FINDING_CUSTOMER_GRID,
+                'Performance Config: Customer Grid Not On "Update on Save"',
+                MetricDefinition::SEVERITY_WARNING,
+                'The customer grid indexer is set to "Update by Schedule".',
+                'Magento does not refresh this grid in schedule mode, so new and edited customers go missing from the admin customer list.'
+            ),
+        ];
     }
 }

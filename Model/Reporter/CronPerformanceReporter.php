@@ -124,8 +124,7 @@ class CronPerformanceReporter implements ReporterInterface, DeclaresSectionInter
                 'Longest Job Duration',
                 (int)($stats['max_duration'] ?? 0),
                 self::METRIC_MAX_DURATION,
-                MetricDefinition::AGGREGATION_MAX,
-                unit: Unit::SECONDS
+                MetricDefinition::AGGREGATION_MAX
             ),
             'slowest_job_code' => $this->field->varchar('Slowest Job', $slowest),
             'avg_job_duration_seconds' => $this->field->number(
@@ -137,8 +136,7 @@ class CronPerformanceReporter implements ReporterInterface, DeclaresSectionInter
                 'Longest Start Lateness',
                 (int)($stats['lag'] ?? 0),
                 self::METRIC_SCHEDULE_LAG,
-                MetricDefinition::AGGREGATION_MAX,
-                unit: Unit::SECONDS
+                MetricDefinition::AGGREGATION_MAX
             ),
             'stuck_jobs' => $this->field->trackableNumber(
                 'Stuck Running Jobs',

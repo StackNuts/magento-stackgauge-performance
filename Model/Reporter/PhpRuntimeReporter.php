@@ -114,8 +114,7 @@ class PhpRuntimeReporter implements ReporterInterface, DeclaresSectionInterface,
                 'Realpath Cache Used',
                 $realpathPct,
                 self::METRIC_REALPATH_CACHE_USED,
-                MetricDefinition::AGGREGATION_MAX,
-                unit: Unit::PERCENT
+                MetricDefinition::AGGREGATION_MAX
             ),
         ];
 
@@ -125,36 +124,31 @@ class PhpRuntimeReporter implements ReporterInterface, DeclaresSectionInterface,
                     'OPcache Hit Rate',
                     (float)$opcache['hit_rate'],
                     self::METRIC_HIT_RATE,
-                    MetricDefinition::AGGREGATION_MIN,
-                    unit: Unit::PERCENT
+                    MetricDefinition::AGGREGATION_MIN
                 ),
                 'opcache_memory_used_pct' => $this->field->trackableNumber(
                     'OPcache Memory Used',
                     (float)$opcache['memory_used_pct'],
                     self::METRIC_MEMORY_USED,
-                    MetricDefinition::AGGREGATION_MAX,
-                    unit: Unit::PERCENT
+                    MetricDefinition::AGGREGATION_MAX
                 ),
                 'opcache_wasted_pct' => $this->field->trackableNumber(
                     'OPcache Wasted',
                     (float)$opcache['wasted_pct'],
                     self::METRIC_WASTED,
-                    MetricDefinition::AGGREGATION_MAX,
-                    unit: Unit::PERCENT
+                    MetricDefinition::AGGREGATION_MAX
                 ),
                 'opcache_keys_used_pct' => $this->field->trackableNumber(
                     'OPcache Keys Used',
                     (float)$opcache['keys_used_pct'],
                     self::METRIC_KEYS_USED,
-                    MetricDefinition::AGGREGATION_MAX,
-                    unit: Unit::PERCENT
+                    MetricDefinition::AGGREGATION_MAX
                 ),
                 'opcache_interned_strings_used_pct' => $this->field->trackableNumber(
                     'OPcache Interned Strings Used',
                     (float)$opcache['interned_strings_used_pct'],
                     self::METRIC_INTERNED_STRINGS_USED,
-                    MetricDefinition::AGGREGATION_MAX,
-                    unit: Unit::PERCENT
+                    MetricDefinition::AGGREGATION_MAX
                 ),
                 'opcache_cached_scripts' => $this->field->number(
                     'OPcache Cached Scripts',

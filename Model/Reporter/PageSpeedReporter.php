@@ -103,8 +103,7 @@ class PageSpeedReporter implements ReporterInterface, DeclaresSectionInterface, 
                     self::METRIC_LABELS[$type] . ' TTFB',
                     $result['ttfb_ms'],
                     self::METRIC_PREFIX . $type . '_ttfb_ms',
-                    MetricDefinition::AGGREGATION_AVG,
-                    unit: Unit::MILLISECONDS
+                    MetricDefinition::AGGREGATION_AVG
                 );
             }
 

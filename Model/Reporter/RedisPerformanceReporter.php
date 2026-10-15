@@ -137,8 +137,7 @@ class RedisPerformanceReporter implements ReporterInterface, DeclaresSectionInte
                 'Peak Memory Used',
                 $maxMemoryPct,
                 self::METRIC_MEMORY_USED,
-                MetricDefinition::AGGREGATION_MAX,
-                unit: Unit::PERCENT
+                MetricDefinition::AGGREGATION_MAX
             );
         }
         if ($minHitRate !== null) {
@@ -146,8 +145,7 @@ class RedisPerformanceReporter implements ReporterInterface, DeclaresSectionInte
                 'Lowest Hit Rate',
                 $minHitRate,
                 self::METRIC_HIT_RATE,
-                MetricDefinition::AGGREGATION_MIN,
-                unit: Unit::PERCENT
+                MetricDefinition::AGGREGATION_MIN
             );
         }
 
