@@ -12,6 +12,7 @@ use Magento\Framework\App\Config\ScopeConfigInterface;
 use Magento\Framework\App\DeploymentConfig;
 use Magento\Framework\App\ScopeInterface as AppScopeInterface;
 use Magento\Framework\App\State;
+use Magento\Framework\Indexer\IndexerRegistry;
 use StackNuts\StackGauge\Api\DeclaresCadenceInterface;
 use StackNuts\StackGauge\Api\DeclaresSectionInterface;
 use StackNuts\StackGauge\Api\Field\Field;
@@ -36,11 +37,15 @@ class PerfConfigReporter implements ReporterInterface, DeclaresCadenceInterface,
     private const FPC_BUILT_IN = 1;
     private const FPC_VARNISH = 2;
     private const MIN_FPC_TTL_SECONDS = 86400;
+    private const CUSTOMER_GRID_INDEXER = 'customer_grid';
+    private const REDIS_DEFAULT_PORT = '6379';
+    private const SESSION_REDIS_HANDLERS = ['redis', 'valkey'];
 
     /**
      * @param State $state
      * @param ScopeConfigInterface $scopeConfig
      * @param DeploymentConfig $deploymentConfig
+     * @param IndexerRegistry $indexerRegistry
      * @param Field $field
      * @param Section $section
      */
@@ -48,6 +53,7 @@ class PerfConfigReporter implements ReporterInterface, DeclaresCadenceInterface,
         private readonly State $state,
         private readonly ScopeConfigInterface $scopeConfig,
         private readonly DeploymentConfig $deploymentConfig,
+        private readonly IndexerRegistry $indexerRegistry,
         private readonly Field $field,
         private readonly Section $section
     ) {
@@ -99,7 +105,7 @@ class PerfConfigReporter implements ReporterInterface, DeclaresCadenceInterface,
         $cacheBackend = (string)$this->deploymentConfig->get('cache/frontend/default/backend', '');
         $sessionHandler = (string)$this->deploymentConfig->get('session/save', 'files');
 
-        return ['general' => $this->section->facts('general', 'General', $this->getDescription(), [
+        $fields = [
             'deploy_mode' => $this->field->varchar(
                 'Deploy Mode',
                 $this->deployMode(),
@@ -148,7 +154,166 @@ class PerfConfigReporter implements ReporterInterface, DeclaresCadenceInterface,
                 'Critical CSS Enabled',
                 $this->scopeConfig->isSetFlag('dev/css/use_css_critical_path', AppScopeInterface::SCOPE_DEFAULT)
             ),
-        ])];
+            'debug_logging_in_production' => $this->field->bool(
+                'Debug Logging On In Production',
+                $this->deployMode() === State::MODE_PRODUCTION && $this->isEnabledSetting(
+                    $this->deploymentConfig->get('dev/debug/debug_logging')
+                ),
+                criticalWhen: true
+            ),
+            'db_profiler_enabled' => $this->field->bool(
+                'Database Profiler Enabled',
+                $this->dbProfilerEnabled(),
+                criticalWhen: true
+            ),
+            'shared_redis_database' => $this->field->bool(
+                'Cache And Sessions Share A Redis Database',
+                $this->hasSharedRedisDatabase(),
+                criticalWhen: true
+            ),
+            'l2_cache_enabled' => $this->field->bool(
+                'L2 Cache Enabled',
+                str_contains($cacheBackend, 'RemoteSynchronizedCache')
+            ),
+        ];
+
+        $customerGridScheduled = $this->customerGridIsScheduled();
+        if ($customerGridScheduled !== null) {
+            $fields['customer_grid_not_update_on_save'] = $this->field->bool(
+                'Customer Grid Not On "Update on Save"',
+                $customerGridScheduled,
+                criticalWhen: true
+            );
+        }
+
+        return ['general' => $this->section->facts('general', 'General', $this->getDescription(), $fields + $this->sessionFields($sessionHandler))];
+    }
+
+    /**
+     * Display-only session tuning facts, reported only when sessions live in Redis/Valkey. Locking
+     * is a deliberate trade-off (safe vs. fewer lock waits), so none of these carry a color.
+     *
+     * @param string $sessionHandler
+     * @return array<string, \StackNuts\StackGauge\Api\Field\FieldInterface>
+     */
+    private function sessionFields(string $sessionHandler): array
+    {
+        $fields = ['session_save_handler' => $this->field->varchar('Session Save Handler', $sessionHandler)];
+        if (!in_array($sessionHandler, self::SESSION_REDIS_HANDLERS, true)) {
+            return $fields;
+        }
+
+        $config = $this->deploymentConfig->get('session/' . $sessionHandler);
+        $config = is_array($config) ? $config : [];
+        $fields['session_locking_disabled'] = $this->field->bool(
+            'Session Locking Disabled',
+            $this->isEnabledSetting($config['disable_locking'] ?? null)
+        );
+        $fields['session_compression_lib'] = $this->field->varchar(
+            'Session Compression',
+            (string)($config['compression_library'] ?? $config['compression_lib'] ?? '') ?: 'none'
+        );
+        $fields['session_max_concurrency'] = $this->field->number(
+            'Session Max Concurrency',
+            (int)($config['max_concurrency'] ?? 6)
+        );
+        $fields['session_break_after_frontend'] = $this->field->number(
+            'Session Break After (frontend)',
+            (int)($config['break_after_frontend'] ?? 5),
+            unit: Unit::SECONDS
+        );
+
+        return $fields;
+    }
+
+    /**
+     * Whether any database connection in env.php has the query profiler switched on.
+     */
+    private function dbProfilerEnabled(): bool
+    {
+        $connections = $this->deploymentConfig->get('db/connection');
+        foreach (is_array($connections) ? $connections : [] as $connection) {
+            if (is_array($connection) && $this->isEnabledSetting($connection['profiler'] ?? null)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * True when the default cache, page cache and Redis sessions do not all use their own host/port/database.
+     * Only the comparison result leaves this method; hosts and ports are never reported.
+     */
+    private function hasSharedRedisDatabase(): bool
+    {
+        $endpoints = [];
+        $frontends = $this->deploymentConfig->get('cache/frontend');
+        foreach (['default', 'page_cache'] as $id) {
+            $frontend = is_array($frontends) ? ($frontends[$id] ?? null) : null;
+            $options = is_array($frontend) ? ($frontend['backend_options'] ?? []) : [];
+            if (str_contains((string)($frontend['backend'] ?? ''), 'RemoteSynchronizedCache')) {
+                $frontend['backend'] = $options['remote_backend'] ?? '';
+                $options = $options['remote_backend_options'] ?? [];
+            }
+            if (is_array($options) && str_contains(strtolower((string)($frontend['backend'] ?? '')), 'redis')) {
+                $endpoints[] = $this->endpointKey($options['server'] ?? '', $options['port'] ?? '', $options['database'] ?? 0);
+            }
+        }
+
+        $sessionHandler = (string)$this->deploymentConfig->get('session/save');
+        if (in_array($sessionHandler, self::SESSION_REDIS_HANDLERS, true)) {
+            $session = $this->deploymentConfig->get('session/' . $sessionHandler);
+            if (is_array($session)) {
+                $endpoints[] = $this->endpointKey($session['host'] ?? '', $session['port'] ?? '', $session['database'] ?? 0);
+            }
+        }
+
+        return count($endpoints) !== count(array_unique($endpoints));
+    }
+
+    /**
+     * Normalized "host:port:database" comparison key.
+     *
+     * @param mixed $host
+     * @param mixed $port
+     * @param mixed $database
+     */
+    private function endpointKey(mixed $host, mixed $port, mixed $database): string
+    {
+        return sprintf(
+            '%s:%s:%d',
+            strtolower((string)$host),
+            (string)$port !== '' ? (string)$port : self::REDIS_DEFAULT_PORT,
+            (int)$database
+        );
+    }
+
+    /**
+     * Whether the customer grid indexer is on "Update by Schedule", or null if the indexer can't be loaded.
+     * Magento's schedule mode never refreshes this grid, so schedule mode is the wrong setting.
+     */
+    private function customerGridIsScheduled(): ?bool
+    {
+        try {
+            return $this->indexerRegistry->get(self::CUSTOMER_GRID_INDEXER)->isScheduled();
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+
+    /**
+     * Truthiness of an env.php flag, where "0", "false", "off" and "" all mean disabled.
+     *
+     * @param mixed $value
+     */
+    private function isEnabledSetting(mixed $value): bool
+    {
+        if (is_string($value)) {
+            return !in_array(strtolower(trim($value)), ['', '0', 'false', 'off', 'no'], true);
+        }
+
+        return !empty($value);
     }
 
     /**

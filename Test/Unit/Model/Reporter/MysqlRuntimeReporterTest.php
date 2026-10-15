@@ -37,6 +37,40 @@ class MysqlRuntimeReporterTest extends TestCase
         $this->assertSame(2, $fields['uptime_hours']->getValue());
     }
 
+    public function testReportsMariaDbDeadlockCounter(): void
+    {
+        $connection = $this->createMock(AdapterInterface::class);
+        $connection->method('fetchPairs')->willReturnOnConsecutiveCalls(['Innodb_deadlocks' => '7'], []);
+        $resource = $this->createMock(ResourceConnection::class);
+        $resource->method('getConnection')->willReturn($connection);
+
+        $fields = (new MysqlRuntimeReporter($resource, new Field(), new Section()))
+            ->getStatus()['general']->getFields();
+
+        $this->assertSame(7, $fields['innodb_deadlocks']->getValue());
+    }
+
+    public function testFallsBackToInnodbMetricsAndOmitsDeadlocksWhenUnavailable(): void
+    {
+        $connection = $this->createMock(AdapterInterface::class);
+        $connection->method('fetchPairs')->willReturn([]);
+        $connection->method('fetchOne')->willReturn('3');
+        $resource = $this->createMock(ResourceConnection::class);
+        $resource->method('getConnection')->willReturn($connection);
+        $fields = (new MysqlRuntimeReporter($resource, new Field(), new Section()))
+            ->getStatus()['general']->getFields();
+        $this->assertSame(3, $fields['innodb_deadlocks']->getValue());
+
+        $connection = $this->createMock(AdapterInterface::class);
+        $connection->method('fetchPairs')->willReturn([]);
+        $connection->method('fetchOne')->willThrowException(new \RuntimeException('no table'));
+        $resource = $this->createMock(ResourceConnection::class);
+        $resource->method('getConnection')->willReturn($connection);
+        $fields = (new MysqlRuntimeReporter($resource, new Field(), new Section()))
+            ->getStatus()['general']->getFields();
+        $this->assertArrayNotHasKey('innodb_deadlocks', $fields);
+    }
+
     public function testReportsUnavailableWhenQueryThrows(): void
     {
         $connection = $this->createMock(AdapterInterface::class);
@@ -51,10 +85,10 @@ class MysqlRuntimeReporterTest extends TestCase
         $this->assertFalse($fields['status_available']->getValue());
     }
 
-    public function testDeclaresThreeMetrics(): void
+    public function testDeclaresFourMetrics(): void
     {
         $reporter = new MysqlRuntimeReporter($this->createMock(ResourceConnection::class), new Field(), new Section());
 
-        $this->assertCount(3, $reporter->getTrackableMetrics());
+        $this->assertCount(4, $reporter->getTrackableMetrics());
     }
 }

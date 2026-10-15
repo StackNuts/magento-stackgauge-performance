@@ -32,16 +32,16 @@ All reporters are filed under StackGauge's **Performance** category.
 | Reporter | Payload key | Cadence | What it covers |
 |---|---|---|---|
 | `PhpRuntimeReporter` | `php_runtime` | Hourly | OPcache hit rate, memory, wasted memory, key-slot and interned-string usage, out-of-memory restarts, realpath cache usage, plus PHP version, SAPI, memory limit and JIT state |
-| `MysqlRuntimeReporter` | `mysql_runtime` | Hourly | MySQL/MariaDB connection headroom, new slow queries, InnoDB buffer pool size and hit rate, on-disk temp table ratio, uptime |
+| `MysqlRuntimeReporter` | `mysql_runtime` | Hourly | MySQL/MariaDB connection headroom, new slow queries, new InnoDB deadlocks, InnoDB buffer pool size and hit rate, on-disk temp table ratio, uptime |
 | `RedisPerformanceReporter` | `redis_perf` | Hourly | Per-instance memory pressure, evicted keys, hit rate, eviction policy and connected clients for the Redis instances behind cache and session |
 | `CronPerformanceReporter` | `cron_perf` | Hourly | Longest and average cron job duration, start lateness, stuck, missed and errored jobs |
 | `PageSpeedReporter` | `page_speed` | Hourly | Time to first byte for a category, product, search and cart page, timed from the server itself |
-| `PerfConfigReporter` | `perf_config` | Daily | Deploy mode, full-page-cache backend and TTL, file-based cache or session storage, HTML minification, critical CSS |
+| `PerfConfigReporter` | `perf_config` | Daily | Deploy mode, full-page-cache backend and TTL, file-based cache or session storage, HTML minification, critical CSS, debug logging in production, DB profiler, shared Redis database, L2 cache, customer grid indexer mode, Redis session tuning |
 | `ModuleHygieneReporter` | `module_hygiene` | Daily | Enabled and third-party module counts, plus a short list of extensions with a documented tendency to add per-request cost |
-| `DbFootprintReporter` | `db_footprint` | Daily | Database size, largest tables, and the size of log and housekeeping tables that grow without bound |
+| `DbFootprintReporter` | `db_footprint` | Daily | Database size, largest tables, the size of log and housekeeping tables that grow without bound, and tables not on InnoDB |
 
-`PerfConfigReporter` is display-only - these are one-off setup decisions, not values that drift
-hourly. JS/CSS minification is covered by the security module's config hygiene reporter, not
+`PerfConfigReporter` is mostly display-only - these are one-off setup decisions, not values that drift
+hourly. Its boolean misconfiguration flags (debug logging in production, DB profiler enabled, shared Redis database, customer grid not on "Update on Save") are alerted on by the StackGauge dashboard as site-level checks rather than metrics; session locking, compression and concurrency are shown but never alert, since locking is a deliberate safety/speed trade-off. No hosts, ports or passwords from `env.php` are ever reported. JS/CSS minification is covered by the security module's config hygiene reporter, not
 repeated here.
 
 ## Alertable metrics
@@ -62,6 +62,7 @@ stricter limit on the same condition, escalating the same alert.
 | `mysql_runtime.connection_usage_pct` | max above | 80% | 95% |
 | `mysql_runtime.slow_queries` | delta above | 100 | - |
 | `mysql_runtime.buffer_pool_hit_pct` | min below | 95% | 90% |
+| `mysql_runtime.innodb_deadlocks` | delta above | 0 | 10 |
 | `redis_perf.memory_used_pct` | max above | 90% | 98% |
 | `redis_perf.evicted_keys` | delta above | 0 | - |
 | `redis_perf.hit_rate` | min below | 80% | 50% |
@@ -70,6 +71,7 @@ stricter limit on the same condition, escalating the same alert.
 | `cron_perf.schedule_lag_seconds` | max above | 900 s | 3600 s |
 | `cron_perf.error_jobs` | max above | 5 | 20 |
 | `db_footprint.housekeeping_tables_mb` | max above | 1024 MB | 5120 MB |
+| `db_footprint.non_innodb_tables` | max above | 0 | - |
 | `page_speed.{category,product,search}_ttfb_ms` | average above | 1000 ms | 3000 ms |
 | `page_speed.cart_ttfb_ms` | average above | 1500 ms | 4000 ms |
 

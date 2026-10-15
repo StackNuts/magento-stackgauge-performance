@@ -24,7 +24,7 @@ use Throwable;
 /**
  * MySQL/MariaDB runtime pressure from SHOW GLOBAL STATUS/VARIABLES: connection headroom, slow
  * queries, on-disk temp tables and InnoDB buffer pool hit rate. Counters are cumulative since
- * server start, so rates here are lifetime ratios and slow queries use a delta metric.
+ * server start, so rates here are lifetime ratios and slow queries and deadlocks use a delta metric.
  */
 class MysqlRuntimeReporter implements ReporterInterface, DeclaresSectionInterface, DeclaresSubjectInterface, MetricCatalogInterface, DeclaresSlotInterface
 {
@@ -34,11 +34,12 @@ class MysqlRuntimeReporter implements ReporterInterface, DeclaresSectionInterfac
     private const METRIC_CONNECTION_USAGE = 'mysql_runtime.connection_usage_pct';
     private const METRIC_SLOW_QUERIES = 'mysql_runtime.slow_queries';
     private const METRIC_BUFFER_POOL_HIT = 'mysql_runtime.buffer_pool_hit_pct';
+    private const METRIC_DEADLOCKS = 'mysql_runtime.innodb_deadlocks';
 
     private const STATUS_KEYS = [
         'Threads_connected', 'Threads_running', 'Max_used_connections', 'Slow_queries', 'Aborted_connects',
         'Created_tmp_tables', 'Created_tmp_disk_tables', 'Innodb_buffer_pool_reads',
-        'Innodb_buffer_pool_read_requests', 'Uptime',
+        'Innodb_buffer_pool_read_requests', 'Uptime', 'Innodb_deadlocks',
     ];
 
     private const VARIABLE_KEYS = ['max_connections', 'innodb_buffer_pool_size', 'slow_query_log'];
@@ -148,6 +149,16 @@ class MysqlRuntimeReporter implements ReporterInterface, DeclaresSectionInterfac
             );
         }
 
+        $deadlocks = $this->deadlockCount($status);
+        if ($deadlocks !== null) {
+            $fields['innodb_deadlocks'] = $this->field->trackableNumber(
+                'InnoDB Deadlocks (since start)',
+                $deadlocks,
+                self::METRIC_DEADLOCKS,
+                MetricDefinition::AGGREGATION_DELTA
+            );
+        }
+
         if ($poolRequests > 0) {
             $fields['buffer_pool_hit_pct'] = $this->field->trackableNumber(
                 'InnoDB Buffer Pool Hit Rate',
@@ -162,7 +173,31 @@ class MysqlRuntimeReporter implements ReporterInterface, DeclaresSectionInterfac
     }
 
     /**
-     * Alertable metrics: connection headroom, slow query growth and buffer pool misses.
+     * Cumulative InnoDB deadlock count, or null when this server doesn't expose one (so no sample is
+     * recorded, rather than a misleading 0). MariaDB has it as a status variable; MySQL only via the
+     * lock_deadlocks counter in INNODB_METRICS, which must be enabled.
+     *
+     * @param array<string, string> $status
+     */
+    private function deadlockCount(array $status): ?int
+    {
+        if (isset($status['Innodb_deadlocks'])) {
+            return (int)$status['Innodb_deadlocks'];
+        }
+
+        try {
+            $count = $this->resource->getConnection()->fetchOne(
+                "SELECT `COUNT` FROM information_schema.INNODB_METRICS WHERE NAME = 'lock_deadlocks' AND STATUS = 'enabled'"
+            );
+        } catch (Throwable) {
+            return null;
+        }
+
+        return is_numeric($count) ? (int)$count : null;
+    }
+
+    /**
+     * Alertable metrics: connection headroom, slow query growth, buffer pool misses and deadlocks.
      */
     public function getTrackableMetrics(): array
     {
@@ -203,6 +238,18 @@ class MysqlRuntimeReporter implements ReporterInterface, DeclaresSectionInterfac
                 impact: 'Reads are going to disk instead of memory; the buffer pool is likely undersized.',
                 criticalThreshold: 90,
                 unit: Unit::PERCENT
+            ),
+            new MetricDefinition(
+                self::METRIC_DEADLOCKS,
+                'MySQL: New InnoDB Deadlocks',
+                MetricDefinition::AGGREGATION_DELTA,
+                MetricDefinition::OPERATOR_GT,
+                0,
+                360,
+                null,
+                description: '{value} new InnoDB deadlocks occurred in the window.',
+                impact: 'Each deadlock rolls back a transaction, so a customer or admin action fails and may need retrying.',
+                criticalThreshold: 10
             ),
         ];
     }

@@ -40,7 +40,14 @@ class DbFootprintReporter implements
 
     private const SCHEMA_VERSION = '1.0';
     private const METRIC_HOUSEKEEPING_MB = 'db_footprint.housekeeping_tables_mb';
+    private const METRIC_NON_INNODB_TABLES = 'db_footprint.non_innodb_tables';
     private const TOP_TABLES = 10;
+    private const LISTED_NON_INNODB_TABLES = 10;
+
+    /**
+     * Name suffixes of the throwaway indexer tables older Magento versions create as MEMORY tables on purpose.
+     */
+    private const MEMORY_TEMP_TABLE_SUFFIXES = ['_tmp', '_idx'];
 
     /**
      * Tables that are append-mostly logs and are safe to prune; not core business data.
@@ -102,7 +109,7 @@ class DbFootprintReporter implements
     {
         try {
             $tables = $this->resource->getConnection()->fetchAll(
-                'SELECT TABLE_NAME AS name, TABLE_ROWS AS table_rows, '
+                'SELECT TABLE_NAME AS name, TABLE_ROWS AS table_rows, ENGINE AS engine, TABLE_TYPE AS table_type, '
                 . 'ROUND((DATA_LENGTH + INDEX_LENGTH) / 1048576, 1) AS size_mb '
                 . 'FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE()'
             );
@@ -121,6 +128,8 @@ class DbFootprintReporter implements
                 $housekeepingMb += (float)$table['size_mb'];
             }
         }
+
+        $nonInnodb = array_values(array_filter($tables, $this->isNonInnodbBaseTable(...)));
 
         usort($tables, static fn (array $a, array $b): int => (float)$b['size_mb'] <=> (float)$a['size_mb']);
         $rows = [];
@@ -144,6 +153,12 @@ class DbFootprintReporter implements
                     MetricDefinition::AGGREGATION_MAX,
                     unit: Unit::MEGABYTES
                 ),
+                'non_innodb_tables' => $this->field->trackableNumber(
+                    'Non-InnoDB Tables',
+                    count($nonInnodb),
+                    self::METRIC_NON_INNODB_TABLES,
+                    MetricDefinition::AGGREGATION_MAX
+                ),
             ]),
             'largest_tables' => $this->section->table(
                 'largest_tables',
@@ -151,11 +166,47 @@ class DbFootprintReporter implements
                 $this->getDescription(),
                 $rows
             ),
+            'non_innodb_tables' => $this->section->table(
+                'non_innodb_tables',
+                'Non-InnoDB Tables',
+                'Base tables not using InnoDB (first ' . self::LISTED_NON_INNODB_TABLES . ').',
+                array_map(
+                    fn (array $table) => $this->field->array($table['name'], [
+                        'name' => $this->field->varchar('Table', $table['name']),
+                        'engine' => $this->field->varchar('Engine', (string)$table['engine']),
+                    ]),
+                    array_slice($nonInnodb, 0, self::LISTED_NON_INNODB_TABLES)
+                )
+            ),
         ];
     }
 
     /**
-     * Alertable metric: combined size of prunable log tables.
+     * Base tables (not views) on a non-InnoDB engine, excluding MEMORY indexer temp tables
+     * (names ending in _tmp/_idx) that Magento creates that way intentionally.
+     *
+     * @param array<string, mixed> $table
+     */
+    private function isNonInnodbBaseTable(array $table): bool
+    {
+        $engine = (string)($table['engine'] ?? '');
+        if (($table['table_type'] ?? 'BASE TABLE') !== 'BASE TABLE' || $engine === '' || strcasecmp($engine, 'InnoDB') === 0) {
+            return false;
+        }
+
+        if (strcasecmp($engine, 'MEMORY') === 0) {
+            foreach (self::MEMORY_TEMP_TABLE_SUFFIXES as $suffix) {
+                if (str_ends_with((string)$table['name'], $suffix)) {
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * Alertable metrics: combined size of prunable log tables, and tables not on InnoDB.
      */
     public function getTrackableMetrics(): array
     {
@@ -172,6 +223,17 @@ class DbFootprintReporter implements
                 impact: 'Unpruned logs bloat backups and slow queries; check cleanup cron and retention settings.',
                 criticalThreshold: 5120,
                 unit: Unit::MEGABYTES
+            ),
+            new MetricDefinition(
+                self::METRIC_NON_INNODB_TABLES,
+                'Database: Non-InnoDB Tables',
+                MetricDefinition::AGGREGATION_MAX,
+                MetricDefinition::OPERATOR_GT,
+                0,
+                1440,
+                null,
+                description: '{value} tables are not using the InnoDB storage engine.',
+                impact: 'MyISAM and similar engines lock whole tables and are not crash-safe, which causes slow writes and data loss after a crash.'
             ),
         ];
     }
