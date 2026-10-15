@@ -10,6 +10,7 @@ namespace StackNuts\StackGaugePerformance\Model\Reporter;
 
 use Magento\Framework\App\ResourceConnection;
 use StackNuts\StackGauge\Api\DeclaresSectionInterface;
+use StackNuts\StackGauge\Api\DeclaresSubjectInterface;
 use StackNuts\StackGauge\Api\DeclaresSlotInterface;
 use StackNuts\StackGauge\Api\Field\Field;
 use StackNuts\StackGauge\Api\MetricCatalogInterface;
@@ -25,7 +26,7 @@ use Throwable;
  * queries, on-disk temp tables and InnoDB buffer pool hit rate. Counters are cumulative since
  * server start, so rates here are lifetime ratios and slow queries use a delta metric.
  */
-class MysqlRuntimeReporter implements ReporterInterface, DeclaresSectionInterface, MetricCatalogInterface, DeclaresSlotInterface
+class MysqlRuntimeReporter implements ReporterInterface, DeclaresSectionInterface, DeclaresSubjectInterface, MetricCatalogInterface, DeclaresSlotInterface
 {
     use PerformanceSectionTrait;
 
@@ -223,5 +224,13 @@ class MysqlRuntimeReporter implements ReporterInterface, DeclaresSectionInterfac
     public function getSlot(): int
     {
         return 1;
+    }
+
+    /**
+     * Subject shared with the other reporters describing the same thing, for cross-linking.
+     */
+    public function getSubject(): string
+    {
+        return 'database';
     }
 }

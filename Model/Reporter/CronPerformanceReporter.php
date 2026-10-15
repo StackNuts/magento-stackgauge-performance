@@ -10,6 +10,7 @@ namespace StackNuts\StackGaugePerformance\Model\Reporter;
 
 use Magento\Framework\App\ResourceConnection;
 use StackNuts\StackGauge\Api\DeclaresSectionInterface;
+use StackNuts\StackGauge\Api\DeclaresSubjectInterface;
 use StackNuts\StackGauge\Api\DeclaresSlotInterface;
 use StackNuts\StackGauge\Api\Field\Field;
 use StackNuts\StackGauge\Api\MetricCatalogInterface;
@@ -26,7 +27,7 @@ use Throwable;
  * retention (about an hour for successes by default), so these are recent-window figures.
  * Times are compared in SQL against UTC_TIMESTAMP() to sidestep PHP's mutable default timezone.
  */
-class CronPerformanceReporter implements ReporterInterface, DeclaresSectionInterface, MetricCatalogInterface, DeclaresSlotInterface
+class CronPerformanceReporter implements ReporterInterface, DeclaresSectionInterface, DeclaresSubjectInterface, MetricCatalogInterface, DeclaresSlotInterface
 {
     use PerformanceSectionTrait;
 
@@ -219,5 +220,13 @@ class CronPerformanceReporter implements ReporterInterface, DeclaresSectionInter
     public function getSlot(): int
     {
         return 2;
+    }
+
+    /**
+     * Subject shared with the other reporters describing the same thing, for cross-linking.
+     */
+    public function getSubject(): string
+    {
+        return 'cron';
     }
 }

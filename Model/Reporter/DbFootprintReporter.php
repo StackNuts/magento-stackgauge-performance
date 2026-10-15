@@ -11,6 +11,7 @@ namespace StackNuts\StackGaugePerformance\Model\Reporter;
 use Magento\Framework\App\ResourceConnection;
 use StackNuts\StackGauge\Api\DeclaresCadenceInterface;
 use StackNuts\StackGauge\Api\DeclaresSectionInterface;
+use StackNuts\StackGauge\Api\DeclaresSubjectInterface;
 use StackNuts\StackGauge\Api\DeclaresSlotInterface;
 use StackNuts\StackGauge\Api\Field\Field;
 use StackNuts\StackGauge\Api\MetricCatalogInterface;
@@ -31,6 +32,7 @@ class DbFootprintReporter implements
     ReporterInterface,
     DeclaresCadenceInterface,
     DeclaresSectionInterface,
+    DeclaresSubjectInterface,
     MetricCatalogInterface, DeclaresSlotInterface
 {
     use DailyCadenceTrait;
@@ -180,5 +182,13 @@ class DbFootprintReporter implements
     public function getSlot(): int
     {
         return 1;
+    }
+
+    /**
+     * Subject shared with the other reporters describing the same thing, for cross-linking.
+     */
+    public function getSubject(): string
+    {
+        return 'database';
     }
 }

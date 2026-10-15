@@ -9,6 +9,7 @@ declare(strict_types=1);
 namespace StackNuts\StackGaugePerformance\Model\Reporter;
 
 use StackNuts\StackGauge\Api\DeclaresSectionInterface;
+use StackNuts\StackGauge\Api\DeclaresSubjectInterface;
 use StackNuts\StackGauge\Api\Field\Field;
 use StackNuts\StackGauge\Api\MetricCatalogInterface;
 use StackNuts\StackGauge\Api\MetricDefinition;
@@ -23,7 +24,7 @@ use StackNuts\StackGaugePerformance\Model\Runtime\WebRuntimeStore;
  * storefront request writes (see Observer\CaptureWebRuntime) - cron runs under the CLI, which
  * would report a different, irrelevant OPcache.
  */
-class PhpRuntimeReporter implements ReporterInterface, DeclaresSectionInterface, MetricCatalogInterface
+class PhpRuntimeReporter implements ReporterInterface, DeclaresSectionInterface, DeclaresSubjectInterface, MetricCatalogInterface
 {
     use PerformanceSectionTrait;
 
@@ -286,5 +287,13 @@ class PhpRuntimeReporter implements ReporterInterface, DeclaresSectionInterface,
                 unit: Unit::PERCENT
             ),
         ];
+    }
+
+    /**
+     * Subject shared with the other reporters describing the same thing, for cross-linking.
+     */
+    public function getSubject(): string
+    {
+        return 'php';
     }
 }

@@ -11,6 +11,7 @@ namespace StackNuts\StackGaugePerformance\Model\Reporter;
 use Magento\Framework\Module\ModuleListInterface;
 use StackNuts\StackGauge\Api\DeclaresCadenceInterface;
 use StackNuts\StackGauge\Api\DeclaresSectionInterface;
+use StackNuts\StackGauge\Api\DeclaresSubjectInterface;
 use StackNuts\StackGauge\Api\DeclaresSlotInterface;
 use StackNuts\StackGauge\Api\Field\Field;
 use StackNuts\StackGauge\Api\ReporterInterface;
@@ -23,7 +24,7 @@ use StackNuts\StackGauge\Model\Reporter\Concern\PerformanceSectionTrait;
  * limited to modules with a documented tendency to add per-request or per-product cost; a hit
  * is a prompt to profile that module, not a verdict that it is slow on this store.
  */
-class ModuleHygieneReporter implements ReporterInterface, DeclaresCadenceInterface, DeclaresSectionInterface, DeclaresSlotInterface
+class ModuleHygieneReporter implements ReporterInterface, DeclaresCadenceInterface, DeclaresSectionInterface, DeclaresSubjectInterface, DeclaresSlotInterface
 {
     use DailyCadenceTrait;
     use PerformanceSectionTrait;
@@ -129,5 +130,13 @@ class ModuleHygieneReporter implements ReporterInterface, DeclaresCadenceInterfa
     public function getSlot(): int
     {
         return 1;
+    }
+
+    /**
+     * Subject shared with the other reporters describing the same thing, for cross-linking.
+     */
+    public function getSubject(): string
+    {
+        return 'modules';
     }
 }
