@@ -64,4 +64,22 @@ class PerfConfigReporterTest extends TestCase
         $this->assertFalse($fields['cache_backend_is_file_based']->getValue());
         $this->assertFalse($fields['session_is_file_based']->getValue());
     }
+
+    public function testReportsCssAndJsMinifyFlags(): void
+    {
+        $state = $this->createMock(State::class);
+        $state->method('getMode')->willReturn('production');
+        $scope = $this->createMock(ScopeConfigInterface::class);
+        $scope->method('getValue')->willReturn(null);
+        $scope->method('isSetFlag')->willReturnCallback(
+            static fn (string $path): bool => $path === 'dev/css/minify_files'
+        );
+        $deployment = $this->createMock(DeploymentConfig::class);
+
+        $fields = (new PerfConfigReporter($state, $scope, $deployment, new Field(), new Section()))
+            ->getStatus()['general']->getFields();
+
+        $this->assertTrue($fields['css_minify_enabled']->getValue());
+        $this->assertFalse($fields['js_minify_enabled']->getValue());
+    }
 }

@@ -142,6 +142,8 @@ class PerfConfigReporter implements ReporterInterface, DeclaresCadenceInterface,
                 $this->scopeConfig->isSetFlag('dev/template/minify_html', AppScopeInterface::SCOPE_DEFAULT),
                 criticalWhen: false
             ),
+            'css_minify_enabled' => $this->minifyFlag('CSS Minify Enabled', 'dev/css/minify_files'),
+            'js_minify_enabled' => $this->minifyFlag('JS Minify Enabled', 'dev/js/minify_files'),
             'critical_css_enabled' => $this->field->bool(
                 'Critical CSS Enabled',
                 $this->scopeConfig->isSetFlag('dev/css/use_css_critical_path', AppScopeInterface::SCOPE_DEFAULT)
@@ -170,5 +172,20 @@ class PerfConfigReporter implements ReporterInterface, DeclaresCadenceInterface,
     private function flag(string $label, string $path): \StackNuts\StackGauge\Api\Field\BoolField
     {
         return $this->field->bool($label, $this->scopeConfig->isSetFlag($path, AppScopeInterface::SCOPE_DEFAULT));
+    }
+
+    /**
+     * Bool for a default-scope minify flag; unlike merge/bundling, off is always the wrong value in production.
+     *
+     * @param string $label
+     * @param string $path
+     */
+    private function minifyFlag(string $label, string $path): \StackNuts\StackGauge\Api\Field\BoolField
+    {
+        return $this->field->bool(
+            $label,
+            $this->scopeConfig->isSetFlag($path, AppScopeInterface::SCOPE_DEFAULT),
+            criticalWhen: false
+        );
     }
 }
