@@ -104,7 +104,7 @@ class MysqlRuntimeReporter implements ReporterInterface, DeclaresSectionInterfac
         }
 
         $maxConnections = (int)($variables['max_connections'] ?? 0);
-        $maxUsed = (int)($status['Max_used_connections'] ?? 0);
+        $connected = (int)($status['Threads_connected'] ?? 0);
         $tmpTables = (int)($status['Created_tmp_tables'] ?? 0);
         $tmpDisk = (int)($status['Created_tmp_disk_tables'] ?? 0);
         $poolReads = (int)($status['Innodb_buffer_pool_reads'] ?? 0);
@@ -114,7 +114,8 @@ class MysqlRuntimeReporter implements ReporterInterface, DeclaresSectionInterfac
             'status_available' => $this->field->bool('Status Available', true, criticalWhen: false),
             'uptime_hours' => $this->field->number('Uptime', (int)floor((int)($status['Uptime'] ?? 0) / 3600), unit: Unit::HOURS),
             'max_connections' => $this->field->number('Max Connections', $maxConnections),
-            'threads_connected' => $this->field->number('Threads Connected', (int)($status['Threads_connected'] ?? 0)),
+            'threads_connected' => $this->field->number('Threads Connected', $connected),
+            'max_used_connections' => $this->field->number('Peak Connections Since Start', (int)($status['Max_used_connections'] ?? 0)),
             'threads_running' => $this->field->number('Threads Running', (int)($status['Threads_running'] ?? 0)),
             'aborted_connects' => $this->field->number('Aborted Connects', (int)($status['Aborted_connects'] ?? 0)),
             'slow_query_log_enabled' => $this->field->bool(
@@ -140,9 +141,11 @@ class MysqlRuntimeReporter implements ReporterInterface, DeclaresSectionInterfac
         ];
 
         if ($maxConnections > 0) {
+            // Current Threads_connected, not Max_used_connections (a peak since server start that can
+            // never fall back); the metric's max aggregation over its window gives the recent peak.
             $fields['connection_usage_pct'] = $this->field->trackableNumber(
-                'Peak Connection Usage',
-                round(($maxUsed / $maxConnections) * 100, 2),
+                'Connection Usage',
+                round(($connected / $maxConnections) * 100, 2),
                 self::METRIC_CONNECTION_USAGE,
                 MetricDefinition::AGGREGATION_MAX
             );

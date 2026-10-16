@@ -38,6 +38,27 @@ class PageSpeedReporterTest extends TestCase
         $this->assertSame('pinned', $status['pages']->getRows()[1]->getValue()['source']->getValue());
     }
 
+    public function testRedirectsAndErrorPagesRecordNoMetric(): void
+    {
+        $discovery = $this->createMock(KeyPageDiscovery::class);
+        $discovery->method('discover')->willReturn([
+            'category' => ['url' => 'https://shop.test/a', 'source' => 'auto'],
+            'product' => ['url' => 'https://shop.test/b', 'source' => 'auto'],
+            'search' => ['url' => 'https://shop.test/c', 'source' => 'auto'],
+        ]);
+        $timer = $this->createMock(PageTimer::class);
+        $timer->method('time')->willReturnMap([
+            ['https://shop.test/a', ['status' => 301, 'ttfb_ms' => 5, 'total_ms' => 5, 'cache' => 'unknown']],
+            ['https://shop.test/b', ['status' => 403, 'ttfb_ms' => 8, 'total_ms' => 8, 'cache' => 'unknown']],
+            ['https://shop.test/c', ['status' => 404, 'ttfb_ms' => 9, 'total_ms' => 9, 'cache' => 'unknown']],
+        ]);
+
+        $status = (new PageSpeedReporter($discovery, $timer, new Field(), new Section()))->getStatus();
+
+        $this->assertSame(['pages_timed'], array_keys($status['summary']->getFields()));
+        $this->assertCount(3, $status['pages']->getRows());
+    }
+
     public function testNoPagesWhenDiscoveryFindsNothing(): void
     {
         $discovery = $this->createMock(KeyPageDiscovery::class);

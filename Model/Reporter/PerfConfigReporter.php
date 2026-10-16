@@ -21,6 +21,7 @@ use StackNuts\StackGauge\Api\MetricDefinition;
 use StackNuts\StackGauge\Api\ReporterInterface;
 use StackNuts\StackGauge\Api\Section\Section;
 use StackNuts\StackGauge\Api\Unit;
+use StackNuts\StackGauge\Model\Redis\RedisInstanceResolver;
 use StackNuts\StackGauge\Model\Reporter\Concern\DailyCadenceTrait;
 use StackNuts\StackGauge\Model\Reporter\Concern\PerformanceSectionTrait;
 
@@ -48,13 +49,13 @@ class PerfConfigReporter implements ReporterInterface, DeclaresCadenceInterface,
     private const FPC_VARNISH = 2;
     private const MIN_FPC_TTL_SECONDS = 86400;
     private const CUSTOMER_GRID_INDEXER = 'customer_grid';
-    private const REDIS_DEFAULT_PORT = '6379';
     private const SESSION_REDIS_HANDLERS = ['redis', 'valkey'];
 
     /**
      * @param State $state
      * @param ScopeConfigInterface $scopeConfig
      * @param DeploymentConfig $deploymentConfig
+     * @param RedisInstanceResolver $redisResolver
      * @param IndexerRegistry $indexerRegistry
      * @param Field $field
      * @param Section $section
@@ -63,6 +64,7 @@ class PerfConfigReporter implements ReporterInterface, DeclaresCadenceInterface,
         private readonly State $state,
         private readonly ScopeConfigInterface $scopeConfig,
         private readonly DeploymentConfig $deploymentConfig,
+        private readonly RedisInstanceResolver $redisResolver,
         private readonly IndexerRegistry $indexerRegistry,
         private readonly Field $field,
         private readonly Section $section
@@ -113,6 +115,7 @@ class PerfConfigReporter implements ReporterInterface, DeclaresCadenceInterface,
         );
         $fpcTtl = (int)$this->scopeConfig->getValue('system/full_page_cache/ttl', AppScopeInterface::SCOPE_DEFAULT);
         $cacheBackend = (string)$this->deploymentConfig->get('cache/frontend/default/backend', '');
+        $effectiveCacheBackend = $this->redisResolver->defaultCacheBackend();
         $sessionHandler = (string)$this->deploymentConfig->get('session/save', 'files');
 
         $fields = [
@@ -142,7 +145,8 @@ class PerfConfigReporter implements ReporterInterface, DeclaresCadenceInterface,
             ),
             'cache_backend_is_file_based' => $this->field->bool(
                 'Cache Backend Is File-based',
-                !str_contains(strtolower($cacheBackend), 'redis') && !str_contains(strtolower($cacheBackend), 'memcache'),
+                !RedisInstanceResolver::isRedisBackend($effectiveCacheBackend)
+                    && !str_contains(strtolower($effectiveCacheBackend), 'memcache'),
                 criticalWhen: true
             ),
             'session_is_file_based' => $this->field->bool(
@@ -256,51 +260,18 @@ class PerfConfigReporter implements ReporterInterface, DeclaresCadenceInterface,
     }
 
     /**
-     * True when the default cache, page cache and Redis sessions do not all use their own host/port/database.
+     * True when any Redis database is used by more than one of the cache frontends and sessions.
      * Only the comparison result leaves this method; hosts and ports are never reported.
      */
     private function hasSharedRedisDatabase(): bool
     {
-        $endpoints = [];
-        $frontends = $this->deploymentConfig->get('cache/frontend');
-        foreach (['default', 'page_cache'] as $id) {
-            $frontend = is_array($frontends) ? ($frontends[$id] ?? null) : null;
-            $options = is_array($frontend) ? ($frontend['backend_options'] ?? []) : [];
-            if (str_contains((string)($frontend['backend'] ?? ''), 'RemoteSynchronizedCache')) {
-                $frontend['backend'] = $options['remote_backend'] ?? '';
-                $options = $options['remote_backend_options'] ?? [];
-            }
-            if (is_array($options) && str_contains(strtolower((string)($frontend['backend'] ?? '')), 'redis')) {
-                $endpoints[] = $this->endpointKey($options['server'] ?? '', $options['port'] ?? '', $options['database'] ?? 0);
+        foreach ($this->redisResolver->resolve() as $instance) {
+            if (count($instance->roles) > 1) {
+                return true;
             }
         }
 
-        $sessionHandler = (string)$this->deploymentConfig->get('session/save');
-        if (in_array($sessionHandler, self::SESSION_REDIS_HANDLERS, true)) {
-            $session = $this->deploymentConfig->get('session/' . $sessionHandler);
-            if (is_array($session)) {
-                $endpoints[] = $this->endpointKey($session['host'] ?? '', $session['port'] ?? '', $session['database'] ?? 0);
-            }
-        }
-
-        return count($endpoints) !== count(array_unique($endpoints));
-    }
-
-    /**
-     * Normalized "host:port:database" comparison key.
-     *
-     * @param mixed $host
-     * @param mixed $port
-     * @param mixed $database
-     */
-    private function endpointKey(mixed $host, mixed $port, mixed $database): string
-    {
-        return sprintf(
-            '%s:%s:%d',
-            strtolower((string)$host),
-            (string)$port !== '' ? (string)$port : self::REDIS_DEFAULT_PORT,
-            (int)$database
-        );
+        return false;
     }
 
     /**

@@ -34,6 +34,12 @@ class CronPerformanceReporter implements ReporterInterface, DeclaresSectionInter
     private const SCHEMA_VERSION = '1.0';
     private const STUCK_AFTER_MINUTES = 30;
     private const LATE_AFTER_MINUTES = 5;
+
+    /**
+     * Only recent history is counted, so an old error or missed job can't hold an alert open for the 3 days
+     * Magento keeps the table; open (pending/running) rows are always included since they are the live backlog.
+     */
+    private const WINDOW = "(scheduled_at > UTC_TIMESTAMP() - INTERVAL 1 HOUR OR status IN ('pending', 'running'))";
     private const METRIC_MAX_DURATION = 'cron_perf.max_job_duration_seconds';
     private const METRIC_STUCK_JOBS = 'cron_perf.stuck_jobs';
     private const METRIC_SCHEDULE_LAG = 'cron_perf.schedule_lag_seconds';
@@ -101,16 +107,19 @@ class CronPerformanceReporter implements ReporterInterface, DeclaresSectionInter
                     AVG(IF(status = 'success', TIMESTAMPDIFF(SECOND, executed_at, finished_at), NULL)) AS avg_duration,
                     MAX(IF(status = 'pending' AND scheduled_at < UTC_TIMESTAMP() - INTERVAL %d MINUTE,
                         TIMESTAMPDIFF(SECOND, scheduled_at, UTC_TIMESTAMP()), 0)) AS lag
-                 FROM %s",
+                 FROM %s WHERE %s",
                 self::STUCK_AFTER_MINUTES,
                 self::LATE_AFTER_MINUTES,
-                $table
+                $table,
+                self::WINDOW
             ));
 
             $slowest = (string)$connection->fetchOne(sprintf(
                 "SELECT job_code FROM %s WHERE status = 'success' AND executed_at IS NOT NULL
-                 AND finished_at IS NOT NULL ORDER BY TIMESTAMPDIFF(SECOND, executed_at, finished_at) DESC LIMIT 1",
-                $table
+                 AND finished_at IS NOT NULL AND %s
+                 ORDER BY TIMESTAMPDIFF(SECOND, executed_at, finished_at) DESC LIMIT 1",
+                $table,
+                self::WINDOW
             ));
         } catch (Throwable) {
             return ['general' => $this->section->facts('general', 'General', $this->getDescription(), [

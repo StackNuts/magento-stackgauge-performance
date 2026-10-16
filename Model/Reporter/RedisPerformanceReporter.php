@@ -9,7 +9,6 @@ declare(strict_types=1);
 namespace StackNuts\StackGaugePerformance\Model\Reporter;
 
 use Credis_Client;
-use Magento\Framework\App\DeploymentConfig;
 use StackNuts\StackGauge\Api\DeclaresSectionInterface;
 use StackNuts\StackGauge\Api\DeclaresSubjectInterface;
 use StackNuts\StackGauge\Api\DeclaresSlotInterface;
@@ -19,14 +18,16 @@ use StackNuts\StackGauge\Api\MetricDefinition;
 use StackNuts\StackGauge\Api\ReporterInterface;
 use StackNuts\StackGauge\Api\Section\Section;
 use StackNuts\StackGauge\Api\Unit;
+use StackNuts\StackGauge\Model\Redis\RedisInstance;
+use StackNuts\StackGauge\Model\Redis\RedisInstanceResolver;
 use StackNuts\StackGauge\Model\Reporter\Concern\PerformanceSectionTrait;
 use Throwable;
 
 /**
  * Memory pressure, evictions and hit ratio for the Redis instances behind cache and session.
  * Reachability and version live in the core Redis reporter; this adds the performance side.
- * Backends are de-duplicated by host:port since INFO is instance-wide, so two cache databases
- * on one instance aren't double counted.
+ * Instances come from the core RedisInstanceResolver and are de-duplicated by host:port since INFO is
+ * instance-wide, so two cache databases on one server aren't double counted.
  */
 class RedisPerformanceReporter implements ReporterInterface, DeclaresSectionInterface, DeclaresSubjectInterface, MetricCatalogInterface, DeclaresSlotInterface
 {
@@ -34,17 +35,18 @@ class RedisPerformanceReporter implements ReporterInterface, DeclaresSectionInte
 
     private const SCHEMA_VERSION = '1.0';
     private const CONNECT_TIMEOUT_SECONDS = 2.0;
+    private const READ_TIMEOUT_SECONDS = 3.0;
     private const METRIC_MEMORY_USED = 'redis_perf.memory_used_pct';
     private const METRIC_EVICTED_KEYS = 'redis_perf.evicted_keys';
     private const METRIC_HIT_RATE = 'redis_perf.hit_rate';
 
     /**
-     * @param DeploymentConfig $deploymentConfig
+     * @param RedisInstanceResolver $resolver
      * @param Field $field
      * @param Section $section
      */
     public function __construct(
-        private readonly DeploymentConfig $deploymentConfig,
+        private readonly RedisInstanceResolver $resolver,
         private readonly Field $field,
         private readonly Section $section
     ) {
@@ -89,12 +91,15 @@ class RedisPerformanceReporter implements ReporterInterface, DeclaresSectionInte
     {
         $rows = [];
         $evicted = 0;
+        $unreachable = 0;
         $maxMemoryPct = null;
         $minHitRate = null;
 
-        foreach ($this->instances() as $name => $options) {
-            $info = $this->info($options);
+        foreach ($this->servers() as $server) {
+            $name = $server['name'];
+            $info = $this->info($server['instance']);
             if ($info === null) {
+                $unreachable++;
                 continue;
             }
 
@@ -109,7 +114,8 @@ class RedisPerformanceReporter implements ReporterInterface, DeclaresSectionInte
             if ($memoryPct !== null) {
                 $maxMemoryPct = max($maxMemoryPct ?? 0.0, $memoryPct);
             }
-            if ($hitRate !== null) {
+            // A session-only instance is write-heavy and its hit ratio says nothing about cache health.
+            if ($hitRate !== null && $server['serves_cache']) {
                 $minHitRate = min($minHitRate ?? 100.0, $hitRate);
             }
 
@@ -126,12 +132,19 @@ class RedisPerformanceReporter implements ReporterInterface, DeclaresSectionInte
         }
 
         $summary = ['instances_checked' => $this->field->number('Instances Checked', count($rows))];
-        $summary['evicted_keys'] = $this->field->trackableNumber(
-            'Evicted Keys (since start)',
-            $evicted,
-            self::METRIC_EVICTED_KEYS,
-            MetricDefinition::AGGREGATION_DELTA
-        );
+        if ($unreachable > 0) {
+            $summary['instances_unreachable'] = $this->field->number('Instances Unreachable', $unreachable);
+        }
+        // The summed counter would drop and then jump back when an instance misses a run, which the
+        // delta aggregation reads as a burst of evictions - so only record it from a complete run.
+        $summary['evicted_keys'] = $unreachable === 0
+            ? $this->field->trackableNumber(
+                'Evicted Keys (since start)',
+                $evicted,
+                self::METRIC_EVICTED_KEYS,
+                MetricDefinition::AGGREGATION_DELTA
+            )
+            : $this->field->number('Evicted Keys (since start)', $evicted);
         if ($maxMemoryPct !== null) {
             $summary['memory_used_pct'] = $this->field->trackableNumber(
                 'Peak Memory Used',
@@ -202,60 +215,52 @@ class RedisPerformanceReporter implements ReporterInterface, DeclaresSectionInte
     }
 
     /**
-     * Distinct Redis instances used by cache frontends and sessions, keyed by a readable name.
+     * Distinct Redis servers (host:port) behind cache and sessions. INFO is server-wide, so two databases
+     * on one server are checked once and their roles joined into one readable name.
      *
-     * @return array<string, array<string,mixed>>
+     * @return list<array{name: string, instance: RedisInstance, serves_cache: bool}>
      */
-    private function instances(): array
+    private function servers(): array
     {
-        $found = [];
-        $add = function (string $name, array $options) use (&$found): void {
-            $host = (string)($options['server'] ?? $options['host'] ?? '');
-            if ($host === '') {
-                return;
-            }
-            $key = $host . ':' . (int)($options['port'] ?? 6379);
-            $found[$key]['name'] = ($found[$key]['name'] ?? '') === '' ? $name : $found[$key]['name'] . '+' . $name;
-            $found[$key]['options'] = $options;
-        };
-
-        foreach ((array)$this->deploymentConfig->get('cache/frontend', []) as $id => $frontend) {
-            if (($frontend['backend'] ?? null) === 'redis') {
-                $add('cache_' . $id, (array)($frontend['backend_options'] ?? []));
+        $servers = [];
+        foreach ($this->resolver->resolve() as $instance) {
+            $key = $instance->serverKey();
+            $servers[$key] ??= ['names' => [], 'instance' => $instance, 'serves_cache' => false];
+            $servers[$key]['names'] = array_merge($servers[$key]['names'], $instance->roles);
+            foreach ($instance->roles as $role) {
+                if ($role !== 'session') {
+                    $servers[$key]['serves_cache'] = true;
+                }
             }
         }
 
-        $session = (array)$this->deploymentConfig->get('session', []);
-        if (($session['save'] ?? null) === 'redis') {
-            $add('session', (array)($session['redis'] ?? []));
-        }
-
-        $named = [];
-        foreach ($found as $entry) {
-            $named[$entry['name']] = $entry['options'];
-        }
-
-        return $named;
+        return array_values(array_map(static fn (array $s): array => [
+            'name' => implode('+', array_unique($s['names'])),
+            'instance' => $s['instance'],
+            'serves_cache' => $s['serves_cache'],
+        ], $servers));
     }
 
     /**
      * INFO for one instance, or null when it can't be reached.
      *
-     * @param array<string,mixed> $options
+     * @param RedisInstance $instance
      * @return array<string,mixed>|null
      */
-    private function info(array $options): ?array
+    protected function info(RedisInstance $instance): ?array
     {
         try {
             $client = new Credis_Client(
-                (string)($options['server'] ?? $options['host']),
-                (int)($options['port'] ?? 6379),
-                self::CONNECT_TIMEOUT_SECONDS,
+                $instance->host,
+                $instance->port,
+                min($instance->timeout, self::CONNECT_TIMEOUT_SECONDS),
                 '',
-                (int)($options['database'] ?? 0),
-                ($options['password'] ?? null) ?: null
+                $instance->database,
+                $instance->password,
+                $instance->username
             );
             $client->setMaxConnectRetries(0);
+            $client->setReadTimeout(self::READ_TIMEOUT_SECONDS);
 
             return $client->info();
         } catch (Throwable) {

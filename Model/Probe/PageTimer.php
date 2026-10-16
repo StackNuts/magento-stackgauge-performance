@@ -20,7 +20,8 @@ use Throwable;
  * Built to leave no trace on the store it measures: every request carries PROBE_HEADER, which
  * Plugin\SkipProbeSearchStats uses to keep the search probe out of the store's search-term
  * popularity stats, and requests share one cookie jar under var/ so the cart probe reuses a
- * single session instead of starting a new one every run.
+ * single session within a run (the jar is dropped once it is from an earlier run, so one run's cart
+ * session never leaks into the next).
  */
 class PageTimer
 {
@@ -30,6 +31,11 @@ class PageTimer
 
     private const CONNECT_TIMEOUT_SECONDS = 3;
     private const TOTAL_TIMEOUT_SECONDS = 10;
+
+    /**
+     * Probe runs are hourly, so a jar older than this belongs to a previous run and is dropped.
+     */
+    private const COOKIE_JAR_MAX_AGE_SECONDS = 1800;
 
     public const CACHE_HIT = 'hit';
     public const CACHE_MISS = 'miss';
@@ -120,6 +126,11 @@ class PageTimer
         try {
             $var = $this->filesystem->getDirectoryWrite(DirectoryList::VAR_DIR);
             $var->create(dirname(self::COOKIE_JAR));
+            if ($var->isExist(self::COOKIE_JAR)
+                && time() - (int)($var->stat(self::COOKIE_JAR)['mtime'] ?? 0) > self::COOKIE_JAR_MAX_AGE_SECONDS
+            ) {
+                $var->delete(self::COOKIE_JAR);
+            }
 
             return $var->getAbsolutePath(self::COOKIE_JAR);
         } catch (Throwable) {

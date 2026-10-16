@@ -11,6 +11,7 @@ use Magento\Framework\Indexer\IndexerRegistry;
 use PHPUnit\Framework\TestCase;
 use StackNuts\StackGauge\Api\Field\Field;
 use StackNuts\StackGauge\Api\Section\Section;
+use StackNuts\StackGauge\Model\Redis\RedisInstanceResolver;
 use StackNuts\StackGaugePerformance\Model\Reporter\PerfConfigReporter;
 
 class PerfConfigReporterTest extends TestCase
@@ -26,12 +27,9 @@ class PerfConfigReporterTest extends TestCase
         ]);
         $scope->method('isSetFlag')->willReturn(false);
         $deployment = $this->createMock(DeploymentConfig::class);
-        $deployment->method('get')->willReturnMap([
-            ['cache/frontend/default/backend', '', ''],
-            ['session/save', 'files', 'files'],
-        ]);
+        $deployment->method('get')->willReturnCallback(self::walker(['session' => ['save' => 'files']]));
 
-        $fields = (new PerfConfigReporter($state, $scope, $deployment, $this->registry(false), new Field(), new Section()))
+        $fields = (new PerfConfigReporter($state, $scope, $deployment, new RedisInstanceResolver($deployment), $this->registry(false), new Field(), new Section()))
             ->getStatus()['general']->getFields();
 
         $this->assertSame('developer', $fields['deploy_mode']->getValue());
@@ -53,12 +51,12 @@ class PerfConfigReporterTest extends TestCase
         ]);
         $scope->method('isSetFlag')->willReturn(false);
         $deployment = $this->createMock(DeploymentConfig::class);
-        $deployment->method('get')->willReturnMap([
-            ['cache/frontend/default/backend', '', '\\Magento\\Framework\\Cache\\Backend\\Redis'],
-            ['session/save', 'files', 'redis'],
-        ]);
+        $deployment->method('get')->willReturnCallback(self::walker([
+            'cache' => ['frontend' => ['default' => ['backend' => '\\Magento\\Framework\\Cache\\Backend\\Redis']]],
+            'session' => ['save' => 'redis'],
+        ]));
 
-        $fields = (new PerfConfigReporter($state, $scope, $deployment, $this->registry(false), new Field(), new Section()))
+        $fields = (new PerfConfigReporter($state, $scope, $deployment, new RedisInstanceResolver($deployment), $this->registry(false), new Field(), new Section()))
             ->getStatus()['general']->getFields();
 
         $this->assertSame('varnish', $fields['fpc_application']->getValue());
@@ -78,7 +76,7 @@ class PerfConfigReporterTest extends TestCase
         );
         $deployment = $this->createMock(DeploymentConfig::class);
 
-        $fields = (new PerfConfigReporter($state, $scope, $deployment, $this->registry(false), new Field(), new Section()))
+        $fields = (new PerfConfigReporter($state, $scope, $deployment, new RedisInstanceResolver($deployment), $this->registry(false), new Field(), new Section()))
             ->getStatus()['general']->getFields();
 
         $this->assertTrue($fields['css_minify_enabled']->getValue());
@@ -88,16 +86,16 @@ class PerfConfigReporterTest extends TestCase
     public function testFlagsDebugLoggingAndProfilerOnlyWhenActuallyOn(): void
     {
         $fields = $this->statusWith([
-            'dev/debug/debug_logging' => 1,
-            'db/connection' => ['default' => ['profiler' => '1'], 'indexer' => ['profiler' => '0']],
+            'dev' => ['debug' => ['debug_logging' => 1]],
+            'db' => ['connection' => ['default' => ['profiler' => '1'], 'indexer' => ['profiler' => '0']]],
         ], 'production')->getFields();
 
         $this->assertTrue($fields['debug_logging_in_production']->getValue());
         $this->assertTrue($fields['db_profiler_enabled']->getValue());
 
         $fields = $this->statusWith([
-            'dev/debug/debug_logging' => 1,
-            'db/connection' => ['default' => ['host' => 'x']],
+            'dev' => ['debug' => ['debug_logging' => 1]],
+            'db' => ['connection' => ['default' => ['host' => 'x']]],
         ], 'developer')->getFields();
 
         $this->assertFalse($fields['debug_logging_in_production']->getValue());
@@ -109,14 +107,13 @@ class PerfConfigReporterTest extends TestCase
         $redis = static fn (string $db): array => ['backend' => 'Magento\\Framework\\Cache\\Backend\\Redis',
             'backend_options' => ['server' => 'redis', 'port' => '6379', 'database' => $db, 'password' => 's3cret']];
         $config = [
-            'cache/frontend' => ['default' => $redis('0'), 'page_cache' => $redis('1')],
-            'session/save' => 'redis',
-            'session/redis' => ['host' => 'redis', 'port' => '6379', 'database' => '2', 'disable_locking' => '0'],
+            'cache' => ['frontend' => ['default' => $redis('0'), 'page_cache' => $redis('1')]],
+            'session' => ['save' => 'redis', 'redis' => ['host' => 'redis', 'port' => '6379', 'database' => '2', 'disable_locking' => '0']],
         ];
 
         $this->assertFalse($this->statusWith($config)->getFields()['shared_redis_database']->getValue());
 
-        $config['session/redis']['database'] = '1';
+        $config['session']['redis']['database'] = '1';
         $section = $this->statusWith($config);
 
         $this->assertTrue($section->getFields()['shared_redis_database']->getValue());
@@ -126,18 +123,17 @@ class PerfConfigReporterTest extends TestCase
     public function testReportsSessionTuningAndL2Cache(): void
     {
         $fields = $this->statusWith([
-            'cache/frontend/default/backend' => '\\Magento\\Framework\\Cache\\Backend\\RemoteSynchronizedCache',
-            'cache/frontend' => ['default' => [
+            'cache' => ['frontend' => ['default' => [
                 'backend' => '\\Magento\\Framework\\Cache\\Backend\\RemoteSynchronizedCache',
                 'backend_options' => ['remote_backend' => 'Magento\\Framework\\Cache\\Backend\\Redis',
                     'remote_backend_options' => ['server' => 'redis', 'database' => '0']],
-            ]],
-            'session/save' => 'redis',
-            'session/redis' => ['disable_locking' => '1', 'compression_library' => 'gzip', 'max_concurrency' => '8',
-                'break_after_frontend' => '3', 'host' => 'redis', 'database' => '0'],
+            ]]],
+            'session' => ['save' => 'redis', 'redis' => ['disable_locking' => '1', 'compression_library' => 'gzip',
+                'max_concurrency' => '8', 'break_after_frontend' => '3', 'host' => 'redis', 'database' => '0']],
         ])->getFields();
 
         $this->assertTrue($fields['l2_cache_enabled']->getValue());
+        $this->assertFalse($fields['cache_backend_is_file_based']->getValue());
         $this->assertTrue($fields['session_locking_disabled']->getValue());
         $this->assertSame('gzip', $fields['session_compression_lib']->getValue());
         $this->assertSame(8, $fields['session_max_concurrency']->getValue());
@@ -165,12 +161,28 @@ class PerfConfigReporterTest extends TestCase
         $scope = $this->createMock(ScopeConfigInterface::class);
         $scope->method('isSetFlag')->willReturn(false);
         $deployment = $this->createMock(DeploymentConfig::class);
-        $deployment->method('get')->willReturnCallback(
-            static fn (string $path, $default = null) => $config[$path] ?? $default
-        );
+        $deployment->method('get')->willReturnCallback(self::walker($config));
 
-        return (new PerfConfigReporter($state, $scope, $deployment, $this->registry($scheduled), new Field(), new Section()))
+        return (new PerfConfigReporter($state, $scope, $deployment, new RedisInstanceResolver($deployment), $this->registry($scheduled), new Field(), new Section()))
             ->getStatus()['general'];
+    }
+
+    /**
+     * @param array<string,mixed> $config nested env.php values
+     */
+    private static function walker(array $config): \Closure
+    {
+        return static function (string $path, $default = null) use ($config) {
+            $value = $config;
+            foreach (explode('/', $path) as $part) {
+                if (!is_array($value) || !array_key_exists($part, $value)) {
+                    return $default;
+                }
+                $value = $value[$part];
+            }
+
+            return $value;
+        };
     }
 
     private function registry(?bool $scheduled): IndexerRegistry

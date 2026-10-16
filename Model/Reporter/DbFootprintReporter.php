@@ -55,7 +55,7 @@ class DbFootprintReporter implements
     private const HOUSEKEEPING_TABLES = [
         'customer_visitor', 'customer_log', 'report_event', 'report_viewed_product_index',
         'report_compared_product_index', 'search_query', 'cron_schedule', 'magento_logging_event',
-        'admin_user_session', 'login_as_customer_log', 'sales_order_status_history',
+        'admin_user_session', 'login_as_customer_log',
     ];
 
     /**

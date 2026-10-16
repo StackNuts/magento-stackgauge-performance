@@ -22,8 +22,8 @@ use StackNuts\StackGaugePerformance\Model\Probe\PageTimer;
 
 /**
  * Time to first byte for the page types that matter - category, product, search and cart - timed
- * from the server itself, so it measures the origin (PHP, database, cache) without CDN or network
- * noise. The homepage is already timed by the uptime reporter. Each page is requested once, so a
+ * from the server itself through the store's public URL, so the request passes through whatever
+ * sits in front of Magento (CDN, Varnish) and the figure includes it. The homepage is already timed by the uptime reporter. Each page is requested once, so a
  * cold full-page-cache entry shows up as a slow "miss" rather than being hidden by a warm-up hit.
  */
 class PageSpeedReporter implements ReporterInterface, DeclaresSectionInterface, MetricCatalogInterface, DeclaresSlotInterface
@@ -96,7 +96,8 @@ class PageSpeedReporter implements ReporterInterface, DeclaresSectionInterface, 
         foreach ($this->discovery->discover() as $type => $page) {
             $url = $page['url'];
             $result = $this->timer->time($url);
-            $responded = $result['status'] > 0;
+            // Only a successful page says anything about speed: a 301, a WAF challenge or a 404 is quick for other reasons.
+            $responded = $result['status'] >= 200 && $result['status'] < 300;
 
             if ($responded && isset(self::METRIC_LABELS[$type])) {
                 $summary[$type . '_ttfb_ms'] = $this->field->trackableNumber(

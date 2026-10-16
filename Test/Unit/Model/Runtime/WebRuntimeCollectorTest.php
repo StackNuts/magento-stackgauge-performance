@@ -17,4 +17,15 @@ class WebRuntimeCollectorTest extends TestCase
         $this->assertArrayHasKey('used_bytes', $snapshot['realpath_cache']);
         $this->assertIsInt($snapshot['collected_at']);
     }
+
+    public function testOpcacheSectionCarriesWarmUpInputsWhenOpcacheIsOn(): void
+    {
+        $opcache = (new WebRuntimeCollector())->collect()['opcache'];
+
+        if ($opcache === null) {
+            $this->markTestSkipped('OPcache is not enabled for this CLI.');
+        }
+        $this->assertArrayHasKey('warm_since', $opcache);
+        $this->assertArrayHasKey('accesses', $opcache);
+    }
 }

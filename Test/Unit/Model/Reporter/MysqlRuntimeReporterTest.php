@@ -17,7 +17,7 @@ class MysqlRuntimeReporterTest extends TestCase
         $connection = $this->createMock(AdapterInterface::class);
         $connection->method('fetchPairs')->willReturnOnConsecutiveCalls(
             [
-                'Max_used_connections' => '80', 'Slow_queries' => '12', 'Created_tmp_tables' => '200',
+                'Threads_connected' => '30', 'Max_used_connections' => '80', 'Slow_queries' => '12', 'Created_tmp_tables' => '200',
                 'Created_tmp_disk_tables' => '50', 'Innodb_buffer_pool_reads' => '10',
                 'Innodb_buffer_pool_read_requests' => '1000', 'Uptime' => '7200',
             ],
@@ -29,7 +29,9 @@ class MysqlRuntimeReporterTest extends TestCase
         $fields = (new MysqlRuntimeReporter($resource, new Field(), new Section()))
             ->getStatus()['general']->getFields();
 
-        $this->assertSame(80.0, $fields['connection_usage_pct']->getValue());
+        // Current connections drive the metric; the since-start peak is display-only and can't hold the alert open.
+        $this->assertSame(30.0, $fields['connection_usage_pct']->getValue());
+        $this->assertSame(80, $fields['max_used_connections']->getValue());
         $this->assertSame(25.0, $fields['tmp_tables_on_disk_pct']->getValue());
         $this->assertSame(99.0, $fields['buffer_pool_hit_pct']->getValue());
         $this->assertSame(12, $fields['slow_queries']->getValue());

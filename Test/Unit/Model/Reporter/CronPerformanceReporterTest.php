@@ -36,6 +36,32 @@ class CronPerformanceReporterTest extends TestCase
         $this->assertSame(1, $fields['error_jobs']->getValue());
     }
 
+    public function testBothQueriesAreLimitedToRecentHistory(): void
+    {
+        $queries = [];
+        $connection = $this->createMock(AdapterInterface::class);
+        $connection->method('fetchRow')->willReturnCallback(static function (string $sql) use (&$queries): array {
+            $queries[] = $sql;
+
+            return [];
+        });
+        $connection->method('fetchOne')->willReturnCallback(static function (string $sql) use (&$queries): string {
+            $queries[] = $sql;
+
+            return '';
+        });
+        $resource = $this->createMock(ResourceConnection::class);
+        $resource->method('getConnection')->willReturn($connection);
+        $resource->method('getTableName')->willReturn('cron_schedule');
+
+        (new CronPerformanceReporter($resource, new Field(), new Section()))->getStatus();
+
+        $this->assertCount(2, $queries);
+        foreach ($queries as $sql) {
+            $this->assertStringContainsString('scheduled_at > UTC_TIMESTAMP() - INTERVAL 1 HOUR', $sql);
+        }
+    }
+
     public function testReportsUnavailableWhenQueryThrows(): void
     {
         $connection = $this->createMock(AdapterInterface::class);

@@ -59,6 +59,10 @@ class WebRuntimeCollector
         $stringBuffer = (float)($strings['buffer_size'] ?? 0);
 
         return [
+            // OPcache's hit rate is measured since its last start or restart, so the reporter needs to know when
+            // that was to avoid reporting the cold-cache rate that follows every deploy.
+            'warm_since' => max((int)($stats['start_time'] ?? 0), (int)($stats['last_restart_time'] ?? 0)),
+            'accesses' => (int)($stats['hits'] ?? 0) + (int)($stats['misses'] ?? 0),
             'hit_rate' => round((float)($stats['opcache_hit_rate'] ?? 0), 2),
             'memory_used_pct' => $total > 0
                 ? round((((float)$memory['used_memory'] + (float)($memory['wasted_memory'] ?? 0)) / $total) * 100, 2)
