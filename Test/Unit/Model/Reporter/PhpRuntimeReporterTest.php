@@ -90,10 +90,30 @@ class PhpRuntimeReporterTest extends TestCase
         $this->assertFalse($fields['opcache_warming_up']->getValue());
     }
 
+    public function testAQuietOpcacheRunningForHoursStillNeedsEnoughAccesses(): void
+    {
+        $now = time();
+        $quiet = $this->snapshot(['collected_at' => $now, 'opcache' => $this->opcache(['warm_since' => $now - 86400, 'accesses' => 30000, 'hit_rate' => 60.0])]);
+        $busy = $this->snapshot(['collected_at' => $now, 'opcache' => $this->opcache(['warm_since' => $now - 86400, 'accesses' => 900000, 'hit_rate' => 99.0])]);
+
+        $this->assertArrayNotHasKey('opcache_hit_rate', $this->statusFor(['a' => $quiet])['general']->getFields());
+        $this->assertSame(99.0, $this->statusFor(['a' => $busy])['general']->getFields()['opcache_hit_rate']->getValue());
+    }
+
+    public function testInternedStringsUsageIsOnlyEverAWarning(): void
+    {
+        $definitions = array_filter(
+            (new PhpRuntimeReporter($this->createMock(WebRuntimeStore::class), new Field(), new Section()))->getTrackableMetrics(),
+            static fn ($definition): bool => $definition->getMetricKey() === 'php_runtime.opcache_interned_strings_used_pct'
+        );
+
+        $this->assertNull(array_values($definitions)[0]->getCriticalThreshold());
+    }
+
     public function testWithoutStartTimeWarmUpFallsBackToAccessCount(): void
     {
         $few = $this->snapshot(['opcache' => $this->opcache(['warm_since' => 0, 'accesses' => 50])]);
-        $many = $this->snapshot(['opcache' => $this->opcache(['warm_since' => 0, 'accesses' => 50000])]);
+        $many = $this->snapshot(['opcache' => $this->opcache(['warm_since' => 0, 'accesses' => 500000])]);
 
         $this->assertArrayNotHasKey('opcache_hit_rate', $this->statusFor(['a' => $few])['general']->getFields());
         $this->assertArrayHasKey('opcache_hit_rate', $this->statusFor(['a' => $many])['general']->getFields());

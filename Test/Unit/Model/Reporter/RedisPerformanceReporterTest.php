@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace StackNuts\StackGaugePerformance\Test\Unit\Model\Reporter;
 
 use Magento\Framework\App\DeploymentConfig;
+use Magento\Framework\FlagManager;
 use PHPUnit\Framework\TestCase;
 use StackNuts\StackGauge\Api\Field\Field;
 use StackNuts\StackGauge\Api\Field\TrackableNumberField;
@@ -15,6 +16,13 @@ use StackNuts\StackGaugePerformance\Model\Reporter\RedisPerformanceReporter;
 class RedisPerformanceReporterTest extends TestCase
 {
     private const MB = 1048576;
+
+    /**
+     * What the reporter's FlagManager holds, shared across reporters built in one test like a real flag table.
+     *
+     * @var array<string, mixed>
+     */
+    private array $flags = [];
 
     public function testReportsZeroInstancesWhenNoRedisBackendsConfigured(): void
     {
@@ -33,11 +41,16 @@ class RedisPerformanceReporterTest extends TestCase
 
     public function testFindsMagentoClassCacheBackendAndSumsAcrossInstances(): void
     {
+        $this->reporter($this->config(), [
+            'cache-host' => ['keyspace_hits' => 0, 'keyspace_misses' => 0],
+            'sess-host' => ['keyspace_hits' => 0, 'keyspace_misses' => 0],
+        ])->getStatus();
+
         $status = $this->reporter($this->config(), [
-            'cache-host' => ['used_memory' => 50 * self::MB, 'maxmemory' => 100 * self::MB, 'keyspace_hits' => 90,
-                'keyspace_misses' => 10, 'evicted_keys' => 4, 'maxmemory_policy' => 'allkeys-lru'],
-            'sess-host' => ['used_memory' => 95 * self::MB, 'maxmemory' => 100 * self::MB, 'keyspace_hits' => 1,
-                'keyspace_misses' => 99, 'evicted_keys' => 2],
+            'cache-host' => ['used_memory' => 50 * self::MB, 'maxmemory' => 100 * self::MB, 'keyspace_hits' => 9000,
+                'keyspace_misses' => 1000, 'evicted_keys' => 4, 'maxmemory_policy' => 'allkeys-lru'],
+            'sess-host' => ['used_memory' => 95 * self::MB, 'maxmemory' => 100 * self::MB, 'keyspace_hits' => 100,
+                'keyspace_misses' => 9900, 'evicted_keys' => 2],
         ])->getStatus();
         $summary = $status['summary']->getFields();
 
@@ -48,6 +61,39 @@ class RedisPerformanceReporterTest extends TestCase
         // The session instance's 1% hit rate must not drag the cache hit rate down.
         $this->assertSame(90.0, $summary['hit_rate']->getValue());
         $this->assertCount(2, $status['instances']->getRows());
+    }
+
+    public function testHitRateComesFromTheCountersSinceThePreviousReport(): void
+    {
+        $info = static fn (int $hits, int $misses): array => ['cache-host' => ['keyspace_hits' => $hits,
+            'keyspace_misses' => $misses], 'sess-host' => null];
+
+        // First report: lifetime counters only - an idle instance's 1% since start is not a current hit rate.
+        $first = $this->reporter($this->config(), $info(1000, 99000))->getStatus();
+        $this->assertArrayNotHasKey('hit_rate', $first['summary']->getFields());
+        $row = $first['instances']->getRows()[0]->getValue();
+        $this->assertSame(1.0, $row['hit_rate']->getValue());
+        $this->assertSame('Too few lookups', $row['recent_hit_rate']->getValue());
+
+        // Too few lookups since: still no hit rate.
+        $quiet = $this->reporter($this->config(), $info(1100, 99100))->getStatus();
+        $this->assertArrayNotHasKey('hit_rate', $quiet['summary']->getFields());
+
+        // Enough lookups since the previous report: 1800 of 2000 hit.
+        $busy = $this->reporter($this->config(), $info(2900, 99300))->getStatus();
+        $this->assertSame(90.0, $busy['summary']->getFields()['hit_rate']->getValue());
+        $this->assertSame('90%', $busy['instances']->getRows()[0]->getValue()['recent_hit_rate']->getValue());
+    }
+
+    public function testARestartedServerCountsEverythingSinceTheRestart(): void
+    {
+        $info = static fn (int $hits, int $misses): array => ['cache-host' => ['keyspace_hits' => $hits,
+            'keyspace_misses' => $misses], 'sess-host' => null];
+
+        $this->reporter($this->config(), $info(500000, 500000))->getStatus();
+        $status = $this->reporter($this->config(), $info(1500, 500))->getStatus();
+
+        $this->assertSame(75.0, $status['summary']->getFields()['hit_rate']->getValue());
     }
 
     public function testUnreachableInstanceStopsTheEvictionMetricFromBeingRecorded(): void
@@ -105,7 +151,15 @@ class RedisPerformanceReporterTest extends TestCase
             return $value;
         });
 
-        return new class (new RedisInstanceResolver($deployment), new Field(), new Section(), $infoByHost)
+        $flagManager = $this->createMock(FlagManager::class);
+        $flagManager->method('getFlagData')->willReturnCallback(fn (string $code) => $this->flags[$code] ?? null);
+        $flagManager->method('saveFlag')->willReturnCallback(function (string $code, $value): bool {
+            $this->flags[$code] = $value;
+
+            return true;
+        });
+
+        return new class (new RedisInstanceResolver($deployment), new Field(), new Section(), $flagManager, $infoByHost)
             extends RedisPerformanceReporter {
             /**
              * @param array<string, array<string,mixed>|null> $infoByHost
@@ -114,9 +168,10 @@ class RedisPerformanceReporterTest extends TestCase
                 RedisInstanceResolver $resolver,
                 Field $field,
                 Section $section,
+                FlagManager $flagManager,
                 private readonly array $infoByHost
             ) {
-                parent::__construct($resolver, $field, $section);
+                parent::__construct($resolver, $field, $section, $flagManager);
             }
 
             protected function info(RedisInstance $instance): ?array

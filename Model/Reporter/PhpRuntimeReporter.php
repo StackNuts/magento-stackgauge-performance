@@ -39,7 +39,13 @@ class PhpRuntimeReporter implements ReporterInterface, DeclaresSectionInterface,
      * Time OPcache needs after a start/restart before its hit rate is representative.
      */
     private const WARMUP_SECONDS = 900;
-    private const WARMUP_MIN_ACCESSES = 10000;
+    /**
+     * OPcache's hit rate is cumulative since its last restart, so on a quiet store the misses from compiling every
+     * script once dominate it for a long time. A couple of hundred page views' worth of file accesses (Magento touches
+     * roughly a thousand files per request) before the rate is trusted keeps an idle staging box from reporting a
+     * permanently "low" hit rate.
+     */
+    private const WARMUP_MIN_ACCESSES = 200000;
     private const METRIC_HIT_RATE = 'php_runtime.opcache_hit_rate';
     private const METRIC_MEMORY_USED = 'php_runtime.opcache_memory_used_pct';
     private const METRIC_OOM_RESTARTS = 'php_runtime.opcache_oom_restarts';
@@ -270,8 +276,9 @@ class PhpRuntimeReporter implements ReporterInterface, DeclaresSectionInterface,
     }
 
     /**
-     * Whether the snapshot's OPcache had been running long enough, when it was captured, for its hit rate to mean
-     * something. A snapshot without start information (written by an older version) is trusted.
+     * Whether the snapshot's OPcache had been running long enough, and served enough accesses, when it was captured,
+     * for its hit rate to mean something. A snapshot without start information (written by an older version) is
+     * trusted.
      *
      * @param array<string, mixed> $snapshot
      */
@@ -282,12 +289,14 @@ class PhpRuntimeReporter implements ReporterInterface, DeclaresSectionInterface,
             return true;
         }
 
+        $enoughAccesses = !array_key_exists('accesses', $opcache)
+            || (int)$opcache['accesses'] >= self::WARMUP_MIN_ACCESSES;
         $since = (int)$opcache['warm_since'];
         if ($since > 0) {
-            return (int)($snapshot['collected_at'] ?? 0) - $since >= self::WARMUP_SECONDS;
+            return $enoughAccesses && (int)($snapshot['collected_at'] ?? 0) - $since >= self::WARMUP_SECONDS;
         }
 
-        return (int)($opcache['accesses'] ?? 0) >= self::WARMUP_MIN_ACCESSES;
+        return array_key_exists('accesses', $opcache) && $enoughAccesses;
     }
 
     /**
@@ -395,7 +404,6 @@ class PhpRuntimeReporter implements ReporterInterface, DeclaresSectionInterface,
                 description: 'OPcache interned-strings buffer is {value} full.',
                 impact: 'Once full, new strings can no longer be interned, increasing memory use '
                     . 'and GC pressure on every request.',
-                criticalThreshold: 98,
                 unit: Unit::PERCENT
             ),
             new MetricDefinition(

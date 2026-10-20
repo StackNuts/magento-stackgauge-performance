@@ -57,7 +57,7 @@ stricter limit on the same condition, escalating the same alert.
 | `php_runtime.opcache_oom_restarts` | delta above | 0 | - |
 | `php_runtime.opcache_wasted_pct` | max above | 20% | - |
 | `php_runtime.opcache_keys_used_pct` | max above | 90% | 98% |
-| `php_runtime.opcache_interned_strings_used_pct` | max above | 90% | 98% |
+| `php_runtime.opcache_interned_strings_used_pct` | max above | 90% | - |
 | `php_runtime.realpath_cache_used_pct` | max above | 90% | - |
 | `mysql_runtime.connection_usage_pct` | max above | 80% | 95% |
 | `mysql_runtime.slow_queries` | delta above | 100 | - |
@@ -76,6 +76,12 @@ stricter limit on the same condition, escalating the same alert.
 | `page_speed.cart_ttfb_ms` | average above | 1500 ms | 4000 ms |
 
 Every other field is shown on its reporter's page but doesn't alert on its own.
+
+The OPcache hit rate is only reported once OPcache has been warm for 15 minutes and has served
+200,000 file accesses, since its rate is cumulative since the last restart. The Redis hit rate
+is worked out from the change in hits and misses since the previous report, and skipped when
+fewer than 1,000 lookups happened in between, so an idle instance's lifetime ratio never
+alerts.
 
 ## How some of it works
 

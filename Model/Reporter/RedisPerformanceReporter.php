@@ -9,6 +9,7 @@ declare(strict_types=1);
 namespace StackNuts\StackGaugePerformance\Model\Reporter;
 
 use Credis_Client;
+use Magento\Framework\FlagManager;
 use StackNuts\StackGauge\Api\DeclaresSectionInterface;
 use StackNuts\StackGauge\Api\DeclaresSubjectInterface;
 use StackNuts\StackGauge\Api\DeclaresSlotInterface;
@@ -28,6 +29,10 @@ use Throwable;
  * Reachability and version live in the core Redis reporter; this adds the performance side.
  * Instances come from the core RedisInstanceResolver and are de-duplicated by host:port since INFO is
  * instance-wide, so two cache databases on one server aren't double counted.
+ *
+ * Redis's hit/miss counters run from server start, so their ratio on a long-lived, mostly idle instance says
+ * nothing about today. The alertable hit rate is therefore taken from the change in those counters since the
+ * previous report (kept in a flag), and only once enough lookups happened in between to mean something.
  */
 class RedisPerformanceReporter implements ReporterInterface, DeclaresSectionInterface, DeclaresSubjectInterface, MetricCatalogInterface, DeclaresSlotInterface
 {
@@ -39,16 +44,20 @@ class RedisPerformanceReporter implements ReporterInterface, DeclaresSectionInte
     private const METRIC_MEMORY_USED = 'redis_perf.memory_used_pct';
     private const METRIC_EVICTED_KEYS = 'redis_perf.evicted_keys';
     private const METRIC_HIT_RATE = 'redis_perf.hit_rate';
+    private const COUNTERS_FLAG = 'stacknuts_stackgauge_redis_perf_counters';
+    private const MIN_RECENT_LOOKUPS = 1000;
 
     /**
      * @param RedisInstanceResolver $resolver
      * @param Field $field
      * @param Section $section
+     * @param FlagManager $flagManager
      */
     public function __construct(
         private readonly RedisInstanceResolver $resolver,
         private readonly Field $field,
-        private readonly Section $section
+        private readonly Section $section,
+        private readonly FlagManager $flagManager
     ) {
     }
 
@@ -94,6 +103,8 @@ class RedisPerformanceReporter implements ReporterInterface, DeclaresSectionInte
         $unreachable = 0;
         $maxMemoryPct = null;
         $minHitRate = null;
+        $previousCounters = $this->previousCounters();
+        $counters = $previousCounters;
 
         foreach ($this->servers() as $server) {
             $name = $server['name'];
@@ -108,7 +119,15 @@ class RedisPerformanceReporter implements ReporterInterface, DeclaresSectionInte
             $hits = (int)($info['keyspace_hits'] ?? 0);
             $misses = (int)($info['keyspace_misses'] ?? 0);
             $memoryPct = $max > 0 ? round(($used / $max) * 100, 2) : null;
-            $hitRate = ($hits + $misses) > 0 ? round(($hits / ($hits + $misses)) * 100, 2) : null;
+            $lifetimeHitRate = ($hits + $misses) > 0 ? round(($hits / ($hits + $misses)) * 100, 2) : null;
+
+            $serverKey = $server['instance']->serverKey();
+            [$recentHits, $recentMisses] = $this->recentCounts($previousCounters[$serverKey] ?? null, $hits, $misses);
+            $counters[$serverKey] = ['hits' => $hits, 'misses' => $misses];
+            $recentLookups = $recentHits + $recentMisses;
+            $hitRate = $recentLookups >= self::MIN_RECENT_LOOKUPS
+                ? round(($recentHits / $recentLookups) * 100, 2)
+                : null;
 
             $evicted += (int)($info['evicted_keys'] ?? 0);
             if ($memoryPct !== null) {
@@ -126,10 +145,17 @@ class RedisPerformanceReporter implements ReporterInterface, DeclaresSectionInte
                 'memory_used_pct' => $this->field->number('Memory Used', $memoryPct ?? 0.0, unit: Unit::PERCENT),
                 'maxmemory_policy' => $this->field->varchar('Eviction Policy', (string)($info['maxmemory_policy'] ?? '')),
                 'evicted_keys' => $this->field->number('Evicted Keys', (int)($info['evicted_keys'] ?? 0)),
-                'hit_rate' => $this->field->number('Hit Rate', $hitRate ?? 0.0, unit: Unit::PERCENT),
+                'hit_rate' => $this->field->number('Hit Rate (since start)', $lifetimeHitRate ?? 0.0, unit: Unit::PERCENT),
+                'recent_lookups' => $this->field->number('Lookups Since Last Report', $recentLookups),
+                'recent_hit_rate' => $this->field->varchar(
+                    'Hit Rate Since Last Report',
+                    $hitRate === null ? 'Too few lookups' : $hitRate . '%'
+                ),
                 'connected_clients' => $this->field->number('Connected Clients', (int)($info['connected_clients'] ?? 0)),
             ]);
         }
+
+        $this->flagManager->saveFlag(self::COUNTERS_FLAG, $counters);
 
         $summary = ['instances_checked' => $this->field->number('Instances Checked', count($rows))];
         if ($unreachable > 0) {
@@ -155,7 +181,7 @@ class RedisPerformanceReporter implements ReporterInterface, DeclaresSectionInte
         }
         if ($minHitRate !== null) {
             $summary['hit_rate'] = $this->field->trackableNumber(
-                'Lowest Hit Rate',
+                'Lowest Hit Rate (since last report)',
                 $minHitRate,
                 self::METRIC_HIT_RATE,
                 MetricDefinition::AGGREGATION_MIN
@@ -206,12 +232,49 @@ class RedisPerformanceReporter implements ReporterInterface, DeclaresSectionInte
                 80,
                 360,
                 null,
-                description: 'A Redis instance has a hit rate of {value}.',
+                description: 'A Redis instance answered only {value} of its lookups since the previous report.',
                 impact: 'Most cache lookups are missing, so Magento is regenerating content on nearly every request.',
                 criticalThreshold: 50,
                 unit: Unit::PERCENT
             ),
         ];
+    }
+
+    /**
+     * Hits and misses since the previous report. A counter that went backwards means the server restarted in
+     * between, so everything it has counted since is recent. With no previous report there is nothing to
+     * compare against, so nothing counts as recent yet.
+     *
+     * @param array{hits?: int, misses?: int}|null $previous
+     * @param int $hits
+     * @param int $misses
+     * @return array{0: int, 1: int}
+     */
+    private function recentCounts(?array $previous, int $hits, int $misses): array
+    {
+        if ($previous === null) {
+            return [0, 0];
+        }
+
+        $previousHits = (int)($previous['hits'] ?? 0);
+        $previousMisses = (int)($previous['misses'] ?? 0);
+        if ($hits < $previousHits || $misses < $previousMisses) {
+            return [$hits, $misses];
+        }
+
+        return [$hits - $previousHits, $misses - $previousMisses];
+    }
+
+    /**
+     * Counters saved by the previous report, by host:port.
+     *
+     * @return array<string, array{hits: int, misses: int}>
+     */
+    private function previousCounters(): array
+    {
+        $saved = $this->flagManager->getFlagData(self::COUNTERS_FLAG);
+
+        return is_array($saved) ? $saved : [];
     }
 
     /**
